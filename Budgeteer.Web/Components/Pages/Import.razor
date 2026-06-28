@@ -146,7 +146,7 @@
                             <td>@m.Date.ToShortDateString()</td>
                             <td>@m.CounterpartyName</td>
                             <td>@m.Description</td>
-                            <td class="text-end @(m.Amount >= 0 ? "text-success" : "text-danger")">
+                            <td class="text-end @(m.Amount.IsNegative ? "text-danger" : "text-success")">
                                 @m.Amount.ToString("N2") @m.Currency
                             </td>
                         </tr>
@@ -242,13 +242,13 @@
             detectedFormat = selectedFormat == BankFormat.Unknown
                 ? Importer.DetectFormat(System.Text.Encoding.UTF8.GetString(fileBytes).Split('\n').FirstOrDefault(l => !string.IsNullOrWhiteSpace(l)) ?? "")
                 : selectedFormat;
-            detectedIban = mutations.Select(m => m.AccountIban).FirstOrDefault(s => !string.IsNullOrWhiteSpace(s)) ?? "";
+            detectedIban = mutations.Select(m => m.AccountIban).FirstOrDefault(i => !i.IsEmpty).ToString();
 
             accounts = await ImportService.LoadAccountsAsync();
 
             // Preselect a matching account by IBAN, else default to creating a new one.
-            var match = accounts.FirstOrDefault(a =>
-                Iban.Normalize(a.Iban) == Iban.Normalize(detectedIban) && Iban.Normalize(detectedIban).Length > 0);
+            var detected = Iban.From(detectedIban);
+            var match = accounts.FirstOrDefault(a => !detected.IsEmpty && Iban.From(a.Iban) == detected);
             if (match != null)
                 targetAccountId = match.Id;
             else if (!string.IsNullOrWhiteSpace(detectedIban))

@@ -1,4 +1,5 @@
 using Budgeteer.Shared.Events.Accounts;
+using Budgeteer.Shared.ValueObjects;
 
 namespace Budgeteer.Accounts.Domain;
 
@@ -11,8 +12,8 @@ public class Account
     public string Id { get; set; } = string.Empty;
     public string Name { get; private set; } = string.Empty;
     public string AccountType { get; private set; } = string.Empty;
-    public string? Iban { get; private set; }
-    public decimal Balance { get; private set; }
+    public Iban Iban { get; private set; } = Iban.Empty;
+    public Money Balance { get; private set; } = Money.Zero;
     public DateTime CreatedAt { get; private set; }
     public List<string> TransactionIds { get; private set; } = new();
 
@@ -25,7 +26,7 @@ public class Account
         Id = evt.AccountId;
         Name = evt.Name;
         AccountType = evt.AccountType;
-        Iban = evt.Iban;
+        Iban = Iban.From(evt.Iban);
         Balance = evt.InitialBalance;
         CreatedAt = evt.CreatedAt;
     }
@@ -67,22 +68,22 @@ public class Account
     // Business logic: Record a transaction
     public TransactionRecorded RecordTransaction(
         string description,
-        decimal amount,
+        Money amount,
         DateTime transactionDate,
         string? payee = null,
         string? importKey = null,
-        string? counterpartyIban = null)
+        Iban counterpartyIban = default)
     {
         return new TransactionRecorded(
             TransactionId: Guid.NewGuid().ToString(),
             AccountId: Id,
             TransactionDate: transactionDate,
             Description: description,
-            Amount: amount,
+            Amount: amount.Value,
             Payee: payee,
             RecordedAt: DateTime.UtcNow,
             ImportKey: importKey,
-            CounterpartyIban: counterpartyIban
+            CounterpartyIban: counterpartyIban.ToNullableString()
         );
     }
 

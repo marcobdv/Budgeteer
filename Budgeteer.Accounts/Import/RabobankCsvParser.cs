@@ -63,13 +63,13 @@ public sealed class RabobankCsvParser : IBankStatementParser
 
                 mutations.Add(new BankMutation
                 {
-                    AccountIban = accountIban,
+                    AccountIban = Iban.From(accountIban),
                     Date = date,
                     Amount = amount,
                     Currency = currency,
                     Description = description,
                     CounterpartyName = string.IsNullOrWhiteSpace(counterpartyName) ? null : counterpartyName,
-                    CounterpartyIban = string.IsNullOrWhiteSpace(counterpartyIban) ? null : counterpartyIban,
+                    CounterpartyIban = Iban.From(counterpartyIban),
                     BalanceAfter = CsvParsingHelpers.ParseOptionalAmount(row.Field("Saldo na trn", "Saldo")),
                     DedupKey = CsvParsingHelpers.MakeDedupKey(
                         "rabobank", accountIban, dateRaw, amountRaw, volgnr, counterpartyIban, description)

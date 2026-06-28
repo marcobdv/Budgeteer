@@ -42,9 +42,9 @@ public sealed class BankImportService
     /// </summary>
     public async Task<string> FindOrCreateAccountByIbanAsync(string iban, string name, string accountType)
     {
-        var normalized = Iban.Normalize(iban);
+        var target = Iban.From(iban);
         var accounts = await LoadAccountsAsync();
-        var existing = accounts.FirstOrDefault(a => Iban.Normalize(a.Iban) == normalized && normalized.Length > 0);
+        var existing = accounts.FirstOrDefault(a => !target.IsEmpty && Iban.From(a.Iban) == target);
         if (existing != null)
             return existing.Id;
 

@@ -1,3 +1,4 @@
+using Budgeteer.Accounts;
 using Budgeteer.Accounts.Domain;
 using Budgeteer.Accounts.ReadModels;
 using Budgeteer.Budget.Categorization;
@@ -107,7 +108,7 @@ public sealed class LedgerService
         // that transfer detection needs to re-pair the two legs of an internal transfer.
         var evt = account.RecordTransaction(
             description, amount, date, payee,
-            importKey: view.ImportKey, counterpartyIban: view.CounterpartyIban);
+            importKey: view.ImportKey, counterpartyIban: Iban.From(view.CounterpartyIban));
         session.Events.Append(view.AccountId, evt);
         var category = TransactionCategorizer.Match(rules, payee, description, amount);
         _budgetHandler.Project(session, evt, category);

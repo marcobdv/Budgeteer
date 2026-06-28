@@ -1,4 +1,5 @@
 using Budgeteer.Shared.Events.Budget;
+using Budgeteer.Shared.ValueObjects;
 
 namespace Budgeteer.Budget.Domain;
 
@@ -12,7 +13,7 @@ public class Expense
     public string TransactionId { get; private set; } = string.Empty;
     public DateTime Date { get; private set; }
     public string Description { get; private set; } = string.Empty;
-    public decimal Amount { get; private set; }
+    public Money Amount { get; private set; } = Money.Zero;
     public string? Category { get; private set; }
     public string? Payee { get; private set; }
     public DateTime RecordedAt { get; private set; }

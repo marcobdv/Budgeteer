@@ -1,3 +1,5 @@
+using Budgeteer.Shared.ValueObjects;
+
 namespace Budgeteer.Accounts.Import;
 
 /// <summary>
@@ -8,13 +10,13 @@ namespace Budgeteer.Accounts.Import;
 public record BankMutation
 {
     /// <summary>IBAN of the account the mutation belongs to (the "own" account).</summary>
-    public string AccountIban { get; init; } = string.Empty;
+    public Iban AccountIban { get; init; } = Iban.Empty;
 
     /// <summary>Booking date of the transaction.</summary>
     public DateTime Date { get; init; }
 
     /// <summary>Signed amount. Positive = money in (income), negative = money out (expense).</summary>
-    public decimal Amount { get; init; }
+    public Money Amount { get; init; }
 
     /// <summary>Currency code, e.g. "EUR".</summary>
     public string Currency { get; init; } = "EUR";
@@ -26,7 +28,7 @@ public record BankMutation
     public string? CounterpartyName { get; init; }
 
     /// <summary>IBAN/account number of the counterparty, when present.</summary>
-    public string? CounterpartyIban { get; init; }
+    public Iban CounterpartyIban { get; init; } = Iban.Empty;
 
     /// <summary>
     /// A stable key derived from the source row, used to detect and skip duplicate imports.

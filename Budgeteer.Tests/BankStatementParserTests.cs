@@ -19,11 +19,11 @@ public class BankStatementParserTests
         Assert.Equal(2, result.Count);
 
         var expense = result[0];
-        Assert.Equal("NL11RABO0123456789", expense.AccountIban);
+        Assert.Equal("NL11RABO0123456789", expense.AccountIban.ToString());
         Assert.Equal(new DateTime(2024, 1, 15), expense.Date);
         Assert.Equal(-12.50m, expense.Amount);
         Assert.Equal("Albert Heijn 1234", expense.CounterpartyName);
-        Assert.Equal("NL22INGB0009876543", expense.CounterpartyIban);
+        Assert.Equal("NL22INGB0009876543", expense.CounterpartyIban.ToString());
         Assert.Contains("Boodschappen", expense.Description);
         Assert.Contains("AH Filiaal 1234", expense.Description); // Omschrijving-1 + -2 joined
 
@@ -41,7 +41,7 @@ public class BankStatementParserTests
         Assert.Equal(2, result.Count);
 
         var expense = result[0];
-        Assert.Equal("NL12KNAB0123456789", expense.AccountIban);
+        Assert.Equal("NL12KNAB0123456789", expense.AccountIban.ToString());
         Assert.Equal(new DateTime(2024, 1, 15), expense.Date); // dd-MM-yyyy
         Assert.Equal(-45.30m, expense.Amount); // "D" -> negative
         Assert.Equal("Albert Heijn", expense.CounterpartyName);

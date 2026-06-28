@@ -51,7 +51,7 @@ public static class StatementReconciliation
         for (int i = 1; i < ordered.Count; i++)
         {
             var prev = ordered[i - 1].BalanceAfter!.Value;
-            var expected = prev + ordered[i].Amount;
+            var expected = prev + ordered[i].Amount.Value;
             var actual = ordered[i].BalanceAfter!.Value;
             if (expected != actual)
                 gaps.Add(new ReconciliationGap(i, expected, actual));

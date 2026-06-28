@@ -67,7 +67,7 @@ public sealed class TransferDetectionService
     {
         var ibanByAccount = accounts
             .Where(a => !string.IsNullOrWhiteSpace(a.Iban))
-            .ToDictionary(a => a.Id, a => Iban.Normalize(a.Iban!));
+            .ToDictionary(a => a.Id, a => Iban.From(a.Iban));
 
         // Incoming candidates indexed by amount, each list deterministically ordered.
         var incomingByAmount = txns
@@ -119,15 +119,15 @@ public sealed class TransferDetectionService
     // Both legs must name the other's own account by IBAN. Requiring a mutual reference (rather than
     // either side) prevents an unrelated equal-amount payment/refund from being mistaken for a transfer.
     private static bool MutuallyReference(
-        TransactionView outgoing, TransactionView incoming, IReadOnlyDictionary<string, string> ibanByAccount)
+        TransactionView outgoing, TransactionView incoming, IReadOnlyDictionary<string, Iban> ibanByAccount)
     {
-        var outCp = Iban.Normalize(outgoing.CounterpartyIban);
-        var inCp = Iban.Normalize(incoming.CounterpartyIban);
-        if (outCp.Length == 0 || inCp.Length == 0)
+        var outCp = Iban.From(outgoing.CounterpartyIban);
+        var inCp = Iban.From(incoming.CounterpartyIban);
+        if (outCp.IsEmpty || inCp.IsEmpty)
             return false;
-        var outOwn = ibanByAccount.TryGetValue(outgoing.AccountId, out var a) ? a : string.Empty;
-        var inOwn = ibanByAccount.TryGetValue(incoming.AccountId, out var b) ? b : string.Empty;
-        return inOwn.Length > 0 && outOwn.Length > 0 && outCp == inOwn && inCp == outOwn;
+        var outOwn = ibanByAccount.TryGetValue(outgoing.AccountId, out var a) ? a : Iban.Empty;
+        var inOwn = ibanByAccount.TryGetValue(incoming.AccountId, out var b) ? b : Iban.Empty;
+        return !inOwn.IsEmpty && !outOwn.IsEmpty && outCp == inOwn && inCp == outOwn;
     }
 
     private static string MakeId(string a, string b)

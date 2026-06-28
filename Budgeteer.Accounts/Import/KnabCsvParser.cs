@@ -73,13 +73,13 @@ public sealed class KnabCsvParser : IBankStatementParser
 
                 mutations.Add(new BankMutation
                 {
-                    AccountIban = accountIban,
+                    AccountIban = Iban.From(accountIban),
                     Date = date,
                     Amount = amount,
                     Currency = currency,
                     Description = description,
                     CounterpartyName = string.IsNullOrWhiteSpace(counterpartyName) ? null : counterpartyName,
-                    CounterpartyIban = string.IsNullOrWhiteSpace(counterpartyIban) ? null : counterpartyIban,
+                    CounterpartyIban = Iban.From(counterpartyIban),
                     BalanceAfter = CsvParsingHelpers.ParseOptionalAmount(row.Field("Saldo", "Saldo na trn")),
                     DedupKey = dedupKey
                 });
