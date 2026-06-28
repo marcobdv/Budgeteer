@@ -1,0 +1,116 @@
+@page "/categories"
+@rendermode InteractiveServer
+@using Budgeteer.Budget.Categorization
+@inject TransactionCategorizer Categorizer
+
+<PageTitle>Categories &amp; Rules</PageTitle>
+
+<h1>Categories &amp; Rules</h1>
+<p class="text-muted">
+    A transaction is auto-categorized when a rule's keyword appears in its payee or description.
+    Higher-priority rules win; <em>learned</em> and <em>manual</em> rules override the built-in defaults.
+</p>
+
+<div class="card mb-4">
+    <div class="card-body">
+        <h5 class="card-title">Add a rule</h5>
+        <div class="row g-2 align-items-end">
+            <div class="col-md-5">
+                <label class="form-label">Keyword (in payee / description)</label>
+                <input class="form-control" @bind="newKeyword" placeholder="e.g. albert heijn" />
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">Category</label>
+                <input class="form-control" @bind="newCategory" placeholder="e.g. Groceries" list="catlist" />
+                <datalist id="catlist">
+                    @foreach (var c in KnownCategories())
+                    {
+                        <option value="@c" />
+                    }
+                </datalist>
+            </div>
+            <div class="col-md-3">
+                <button class="btn btn-success w-100" @onclick="AddRule" disabled="@busy">Add rule</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+@if (rules.Count == 0)
+{
+    <div class="alert alert-info">No rules yet.</div>
+}
+else
+{
+    @foreach (var group in rules.GroupBy(r => r.Category).OrderBy(g => g.Key))
+    {
+        <h5 class="mt-3">@group.Key <span class="badge bg-secondary">@group.Count()</span></h5>
+        <table class="table table-sm">
+            <thead>
+                <tr><th>Keyword</th><th>Source</th><th>Priority</th><th></th></tr>
+            </thead>
+            <tbody>
+                @foreach (var r in group.OrderByDescending(x => x.Priority).ThenBy(x => x.Keyword))
+                {
+                    <tr>
+                        <td><code>@r.Keyword</code></td>
+                        <td>
+                            <span class="badge @SourceBadge(r.Source)">@r.Source</span>
+                        </td>
+                        <td>@r.Priority</td>
+                        <td class="text-end">
+                            <button class="btn btn-outline-danger btn-sm" @onclick="@(() => DeleteRule(r.Id))" disabled="@busy">Delete</button>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+}
+
+@code {
+    private List<CategorizationRule> rules = new();
+    private string newKeyword = "";
+    private string newCategory = "";
+    private bool busy;
+
+    protected override async Task OnInitializedAsync() => await Load();
+
+    private async Task Load()
+    {
+        rules = (await Categorizer.GetRulesAsync()).ToList();
+    }
+
+    private async Task AddRule()
+    {
+        if (string.IsNullOrWhiteSpace(newKeyword) || string.IsNullOrWhiteSpace(newCategory))
+            return;
+        busy = true;
+        await Categorizer.AddOrUpdateRuleAsync(newKeyword, newCategory, RuleSource.Manual);
+        newKeyword = "";
+        newCategory = "";
+        await Load();
+        busy = false;
+    }
+
+    private async Task DeleteRule(string id)
+    {
+        busy = true;
+        await Categorizer.DeleteRuleAsync(id);
+        await Load();
+        busy = false;
+    }
+
+    private IEnumerable<string> KnownCategories() =>
+        rules.Select(r => r.Category)
+            .Where(c => !string.IsNullOrWhiteSpace(c))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(c => c);
+
+    private static string SourceBadge(RuleSource s) => s switch
+    {
+        RuleSource.Learned => "bg-info",
+        RuleSource.Manual => "bg-primary",
+        _ => "bg-secondary"
+    };
+}

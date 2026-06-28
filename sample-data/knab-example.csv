@@ -1,0 +1,5 @@
+"Rekeningnummer";"Transactiedatum";"Valutacode";"CreditDebet";"Bedrag";"Tegenrekeningnummer";"Tegenrekeninghouder";"Valutadatum";"Betaalwijze";"Omschrijving";"Type betaling";"Machtigingsnummer";"Incassant ID";"Adres"
+"NL12KNAB0123456789";"15-01-2024";"EUR";"D";"45,30";"NL22INGB0009876543";"Albert Heijn";"15-01-2024";"Betaalautomaat";"Boodschappen AH Amsterdam";"Betaalautomaat";"";"";"Damrak 1 Amsterdam"
+"NL12KNAB0123456789";"16-01-2024";"EUR";"C";"2.250,00";"NL33ABNA0001112223";"Werkgever BV";"16-01-2024";"Overboeking";"Salaris januari 2024";"Overboeking";"";"";""
+"NL12KNAB0123456789";"18-01-2024";"EUR";"D";"9,99";"NL55BUNQ0007778889";"Spotify AB";"18-01-2024";"Incasso";"Spotify Premium";"Incasso";"M0099887";"NL99ZZZ987654320000";""
+"NL12KNAB0123456789";"22-01-2024";"EUR";"D";"1.025,00";"NL66TRIO0001234567";"Verhuurder Vastgoed";"22-01-2024";"Overboeking";"Huur februari 2024";"Overboeking";"";"";""

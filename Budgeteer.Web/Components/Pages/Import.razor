@@ -1,0 +1,312 @@
+@page "/import"
+@rendermode InteractiveServer
+@using Budgeteer.Accounts
+@using Budgeteer.Accounts.ReadModels
+@using Budgeteer.Accounts.Import
+@using Budgeteer.Web.Services
+@inject BankStatementImporter Importer
+@inject BankImportService ImportService
+@inject LedgerService Ledger
+
+<PageTitle>Import Bank Mutations</PageTitle>
+
+<h1>Import Bank Mutations</h1>
+<p class="text-muted">Upload a CSV export from <strong>KNAB</strong> or <strong>Rabobank</strong>.</p>
+
+@if (lastImport is not null)
+{
+    <div class="alert alert-light border d-flex justify-content-between align-items-center">
+        <span>
+            Last import: <strong>@lastImport.TransactionIds.Count</strong> transaction(s) into
+            <strong>@lastImport.AccountName</strong> on @lastImport.ImportedAt.ToLocalTime().ToString("g").
+        </span>
+        @if (undoConfirm)
+        {
+            <span>
+                <span class="text-muted small me-1">Undo this import?</span>
+                <button class="btn btn-danger btn-sm" @onclick="UndoLastImport" disabled="@busy">Yes, undo</button>
+                <button class="btn btn-outline-secondary btn-sm" @onclick="@(() => undoConfirm = false)">Cancel</button>
+            </span>
+        }
+        else
+        {
+            <button class="btn btn-outline-danger btn-sm" @onclick="@(() => undoConfirm = true)" disabled="@busy">Undo last import</button>
+        }
+    </div>
+}
+@if (undoMessage is not null)
+{
+    <div class="alert alert-info py-2">@undoMessage</div>
+}
+
+<div class="card mb-4">
+    <div class="card-body">
+        <div class="row g-3 align-items-end">
+            <div class="col-md-5">
+                <label class="form-label">CSV file</label>
+                <InputFile class="form-control" OnChange="OnFileSelected" accept=".csv,text/csv" />
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">Bank format</label>
+                <select class="form-select" @bind="selectedFormat">
+                    <option value="@BankFormat.Unknown">Auto-detect</option>
+                    <option value="@BankFormat.Knab">KNAB</option>
+                    <option value="@BankFormat.Rabobank">Rabobank</option>
+                </select>
+            </div>
+            <div class="col-md-3">
+                <button class="btn btn-primary w-100" @onclick="ParseFile" disabled="@(fileBytes is null || busy)">
+                    @(busy ? "Working…" : "Parse")
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+@if (!string.IsNullOrEmpty(error))
+{
+    <div class="alert alert-danger">@error</div>
+}
+
+@if (mutations is { Count: > 0 })
+{
+    <div class="card mb-4">
+        <div class="card-body">
+            <h5 class="card-title">
+                Detected: <span class="badge bg-info">@detectedFormat</span>
+                — @mutations.Count mutation(s)
+            </h5>
+
+            @if (reconciliation.Checked)
+            {
+                @if (reconciliation.Consistent)
+                {
+                    <div class="alert alert-success py-2">
+                        ✓ Statement balances are consistent — no missing transactions detected.
+                    </div>
+                }
+                else
+                {
+                    <div class="alert alert-warning py-2">
+                        ⚠️ Statement balance check found <strong>@reconciliation.Gaps.Count</strong>
+                        discontinuit(y/ies) — a transaction may be missing or duplicated around row(s):
+                        @string.Join(", ", reconciliation.Gaps.Take(5).Select(g => g.RowIndex + 1)).
+                    </div>
+                }
+            }
+
+            <div class="row g-3 align-items-end mb-3">
+                <div class="col-md-6">
+                    <label class="form-label">Import into account</label>
+                    <select class="form-select" @bind="targetAccountId">
+                        @if (!string.IsNullOrWhiteSpace(detectedIban))
+                        {
+                            <option value="@CreateNewSentinel">➕ New account for @detectedIban</option>
+                        }
+                        @foreach (var a in accounts)
+                        {
+                            <option value="@a.Id">@a.Name @(string.IsNullOrWhiteSpace(a.Iban) ? "" : $"({a.Iban})")</option>
+                        }
+                    </select>
+                </div>
+                @if (targetAccountId == CreateNewSentinel)
+                {
+                    <div class="col-md-4">
+                        <label class="form-label">New account name</label>
+                        <input class="form-control" @bind="newAccountName" />
+                    </div>
+                }
+                <div class="col-md-2">
+                    <button class="btn btn-success w-100" @onclick="DoImport" disabled="@busy">Import</button>
+                </div>
+            </div>
+
+            @if (lastResult is not null)
+            {
+                <div class="alert alert-success">
+                    Imported <strong>@lastResult.Imported</strong> new mutation(s),
+                    skipped <strong>@lastResult.Skipped</strong> duplicate(s).
+                </div>
+            }
+
+            <h6>Preview (first @Math.Min(previewCount, mutations.Count) of @mutations.Count)</h6>
+            <table class="table table-sm table-striped">
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Counterparty</th>
+                        <th>Description</th>
+                        <th class="text-end">Amount</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var m in mutations.Take(previewCount))
+                    {
+                        <tr>
+                            <td>@m.Date.ToShortDateString()</td>
+                            <td>@m.CounterpartyName</td>
+                            <td>@m.Description</td>
+                            <td class="text-end @(m.Amount >= 0 ? "text-success" : "text-danger")">
+                                @m.Amount.ToString("N2") @m.Currency
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+}
+
+@code {
+    private const string CreateNewSentinel = "__create_new__";
+    private const int previewCount = 25;
+
+    private byte[]? fileBytes;
+    private string? fileName;
+    private BankFormat selectedFormat = BankFormat.Unknown;
+    private BankFormat detectedFormat = BankFormat.Unknown;
+    private string detectedIban = "";
+    private IReadOnlyList<BankMutation>? mutations;
+    private List<AccountSummary> accounts = new();
+    private string targetAccountId = "";
+    private string newAccountName = "";
+    private string? error;
+    private bool busy;
+    private ImportResult? lastResult;
+    private ReconciliationResult reconciliation = ReconciliationResult.NotAvailable;
+    private ImportBatch? lastImport;
+    private bool undoConfirm;
+    private string? undoMessage;
+
+    protected override async Task OnInitializedAsync()
+    {
+        lastImport = await Ledger.GetLastImportAsync();
+    }
+
+    private async Task UndoLastImport()
+    {
+        if (lastImport is null) return;
+        busy = true;
+        var removed = await Ledger.UndoImportAsync(lastImport.Id);
+        undoMessage = $"Undid the import — removed {removed} transaction(s).";
+        undoConfirm = false;
+        lastImport = await Ledger.GetLastImportAsync();
+        accounts = await ImportService.LoadAccountsAsync();
+        busy = false;
+    }
+
+    private async Task OnFileSelected(InputFileChangeEventArgs e)
+    {
+        error = null;
+        lastResult = null;
+        mutations = null;
+        try
+        {
+            var file = e.File;
+            fileName = file.Name;
+            using var ms = new MemoryStream();
+            // Allow up to 25 MB for large statement exports.
+            await using var stream = file.OpenReadStream(maxAllowedSize: 25 * 1024 * 1024);
+            await stream.CopyToAsync(ms);
+            fileBytes = ms.ToArray();
+        }
+        catch (Exception ex)
+        {
+            error = $"Could not read file: {ex.Message}";
+            fileBytes = null;
+        }
+    }
+
+    private async Task ParseFile()
+    {
+        error = null;
+        lastResult = null;
+        busy = true;
+        try
+        {
+            if (fileBytes is null)
+            {
+                error = "Please choose a CSV file first.";
+                return;
+            }
+
+            mutations = Importer.Parse(fileBytes, selectedFormat);
+            if (mutations.Count == 0)
+            {
+                error = "No mutations were found in this file. Is it the right export?";
+                return;
+            }
+
+            reconciliation = StatementReconciliation.Check(mutations);
+
+            detectedFormat = selectedFormat == BankFormat.Unknown
+                ? Importer.DetectFormat(System.Text.Encoding.UTF8.GetString(fileBytes).Split('\n').FirstOrDefault(l => !string.IsNullOrWhiteSpace(l)) ?? "")
+                : selectedFormat;
+            detectedIban = mutations.Select(m => m.AccountIban).FirstOrDefault(s => !string.IsNullOrWhiteSpace(s)) ?? "";
+
+            accounts = await ImportService.LoadAccountsAsync();
+
+            // Preselect a matching account by IBAN, else default to creating a new one.
+            var match = accounts.FirstOrDefault(a =>
+                Iban.Normalize(a.Iban) == Iban.Normalize(detectedIban) && Iban.Normalize(detectedIban).Length > 0);
+            if (match != null)
+                targetAccountId = match.Id;
+            else if (!string.IsNullOrWhiteSpace(detectedIban))
+                targetAccountId = CreateNewSentinel;
+            else
+                targetAccountId = accounts.FirstOrDefault()?.Id ?? "";
+
+            newAccountName = string.IsNullOrWhiteSpace(detectedIban)
+                ? $"{detectedFormat} import"
+                : detectedIban;
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+            mutations = null;
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private async Task DoImport()
+    {
+        if (mutations is null || mutations.Count == 0)
+            return;
+
+        error = null;
+        busy = true;
+        try
+        {
+            string accountId = targetAccountId;
+            if (targetAccountId == CreateNewSentinel)
+            {
+                accountId = await ImportService.FindOrCreateAccountByIbanAsync(
+                    iban: detectedIban,
+                    name: string.IsNullOrWhiteSpace(newAccountName) ? detectedIban : newAccountName,
+                    accountType: "Checking");
+            }
+
+            if (string.IsNullOrWhiteSpace(accountId))
+            {
+                error = "Please select or create a target account.";
+                return;
+            }
+
+            lastResult = await ImportService.ImportAsync(accountId, mutations);
+            accounts = await ImportService.LoadAccountsAsync();
+            lastImport = await Ledger.GetLastImportAsync();
+            undoMessage = null;
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+}

@@ -1,0 +1,317 @@
+@page "/transactions"
+@rendermode InteractiveServer
+@using Budgeteer.Accounts.Domain
+@using Budgeteer.Accounts.ReadModels
+@using Budgeteer.Shared.Events.Accounts
+@using Budgeteer.Budget.EventHandlers
+@using Budgeteer.Web.Services
+@using Marten
+@inject IDocumentStore AccountStore
+@inject TransactionEventHandler TransactionHandler
+@inject TransactionQueryService Query
+@inject TransferDetectionService Transfers
+@inject LedgerService Ledger
+
+<PageTitle>Transactions</PageTitle>
+
+<h1>Transactions</h1>
+
+<div class="mb-3">
+    <button class="btn btn-primary" @onclick="ShowAddForm">Add Transaction</button>
+</div>
+
+@if (showAddForm)
+{
+    <div class="card mb-4">
+        <div class="card-body">
+            <h5 class="card-title">@(editingId is null ? "Add Transaction" : "Edit Transaction")</h5>
+            <EditForm Model="newTransaction" OnValidSubmit="AddTransaction">
+                <div class="mb-3">
+                    <label class="form-label">Account</label>
+                    <InputSelect class="form-control" @bind-Value="newTransaction.AccountId">
+                        <option value="">-- Select Account --</option>
+                        @foreach (var account in accounts)
+                        {
+                            <option value="@account.Id">@account.Name</option>
+                        }
+                    </InputSelect>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Date</label>
+                    <InputDate class="form-control" @bind-Value="newTransaction.Date" />
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Description</label>
+                    <InputText class="form-control" @bind-Value="newTransaction.Description" />
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Amount (negative for expense, positive for income)</label>
+                    <InputNumber class="form-control" @bind-Value="newTransaction.Amount" />
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Payee (optional)</label>
+                    <InputText class="form-control" @bind-Value="newTransaction.Payee" />
+                </div>
+                <button type="submit" class="btn btn-success">@(editingId is null ? "Add Transaction" : "Save Changes")</button>
+                <button type="button" class="btn btn-secondary" @onclick="CancelForm">Cancel</button>
+            </EditForm>
+        </div>
+    </div>
+}
+
+<!-- Filters -->
+<div class="card mb-3">
+    <div class="card-body">
+        <div class="row g-2 align-items-end">
+            <div class="col-md-3">
+                <label class="form-label mb-0">Account</label>
+                <select class="form-select form-select-sm" @bind="filterAccountId">
+                    <option value="">All accounts</option>
+                    @foreach (var a in accounts)
+                    {
+                        <option value="@a.Id">@a.Name</option>
+                    }
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label mb-0">Category</label>
+                <select class="form-select form-select-sm" @bind="filterCategory">
+                    <option value="">All</option>
+                    @foreach (var c in categories)
+                    {
+                        <option value="@c">@c</option>
+                    }
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label mb-0">Flow</label>
+                <select class="form-select form-select-sm" @bind="filterFlow">
+                    <option value="@FlowFilter.All">All</option>
+                    <option value="@FlowFilter.IncomeOnly">Income</option>
+                    <option value="@FlowFilter.ExpenseOnly">Expenses</option>
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label mb-0">From</label>
+                <input type="date" class="form-control form-control-sm" @bind="filterFrom" />
+            </div>
+            <div class="col-md-2">
+                <label class="form-label mb-0">To</label>
+                <input type="date" class="form-control form-control-sm" @bind="filterTo" />
+            </div>
+            <div class="col-md-1">
+                <button class="btn btn-outline-secondary btn-sm w-100" @onclick="ClearFilters">Clear</button>
+            </div>
+            <div class="col-md-12 mt-2">
+                <input class="form-control form-control-sm" placeholder="Search description or payee…" @bind="filterSearch" @bind:event="oninput" />
+            </div>
+        </div>
+    </div>
+</div>
+
+@{
+    var filtered = TransactionQueryService.Apply(allRows, CurrentFilter());
+    var shownTotal = filtered.Sum(r => r.Amount);
+}
+
+<p class="text-muted">
+    Showing <strong>@filtered.Count</strong> of @allRows.Count · net
+    <span class="@(shownTotal >= 0 ? "text-success" : "text-danger")">€@shownTotal.ToString("N2")</span>
+</p>
+
+@if (filtered.Count > 0)
+{
+    <table class="table table-striped table-sm">
+        <thead>
+            <tr>
+                <th>Date</th>
+                <th>Account</th>
+                <th>Description</th>
+                <th>Payee</th>
+                <th>Category</th>
+                <th class="text-end">Amount</th>
+                <th class="text-end">Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var r in filtered)
+            {
+                <tr>
+                    <td style="white-space:nowrap">@r.Date.ToShortDateString()</td>
+                    <td>@r.AccountName</td>
+                    <td>@r.Description</td>
+                    <td>@r.Payee</td>
+                    <td>
+                        @if (r.IsTransfer)
+                        {
+                            <span class="badge bg-secondary">Transfer</span>
+                        }
+                        else if (!string.IsNullOrWhiteSpace(r.Category))
+                        {
+                            <span class="badge bg-light text-dark border">@r.Category</span>
+                        }
+                        else
+                        {
+                            <span class="text-muted">—</span>
+                        }
+                    </td>
+                    <td class="text-end @(r.Amount >= 0 ? "text-success" : "text-danger")">
+                        €@r.Amount.ToString("N2")
+                    </td>
+                    <td class="text-end" style="white-space:nowrap">
+                        @if (pendingDelete == r.TransactionId)
+                        {
+                            <span class="text-muted small me-1">Delete?</span>
+                            <button class="btn btn-danger btn-sm" @onclick="@(() => ConfirmDelete(r.TransactionId))" disabled="@busy">Yes</button>
+                            <button class="btn btn-outline-secondary btn-sm" @onclick="@(() => pendingDelete = null)">No</button>
+                        }
+                        else
+                        {
+                            <button class="btn btn-outline-secondary btn-sm" @onclick="@(() => ShowEditForm(r))" disabled="@busy">Edit</button>
+                            <button class="btn btn-outline-danger btn-sm" @onclick="@(() => pendingDelete = r.TransactionId)" disabled="@busy">Delete</button>
+                        }
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+else
+{
+    <div class="alert alert-info">No transactions match the current filters.</div>
+}
+
+@code {
+    private List<AccountSummary> accounts = new();
+    private List<TransactionRow> allRows = new();
+    private List<string> categories = new();
+    private bool showAddForm = false;
+    private NewTransactionModel newTransaction = new();
+    private string? editingId;       // non-null when the form is editing an existing transaction
+    private string? pendingDelete;   // transaction id awaiting delete confirmation
+    private bool busy;
+
+    // Filter state
+    private string filterAccountId = "";
+    private string filterCategory = "";
+    private FlowFilter filterFlow = FlowFilter.All;
+    private DateTime? filterFrom;
+    private DateTime? filterTo;
+    private string filterSearch = "";
+
+    protected override async Task OnInitializedAsync() => await Reload();
+
+    private async Task Reload()
+    {
+        await LoadAccounts();
+        allRows = await Query.LoadAllAsync();
+        categories = TransactionQueryService.DistinctCategories(allRows).ToList();
+    }
+
+    private TransactionFilter CurrentFilter() => new(
+        AccountId: string.IsNullOrEmpty(filterAccountId) ? null : filterAccountId,
+        From: filterFrom,
+        To: filterTo,
+        Category: string.IsNullOrEmpty(filterCategory) ? null : filterCategory,
+        Search: string.IsNullOrWhiteSpace(filterSearch) ? null : filterSearch,
+        Flow: filterFlow);
+
+    private void ClearFilters()
+    {
+        filterAccountId = "";
+        filterCategory = "";
+        filterFlow = FlowFilter.All;
+        filterFrom = null;
+        filterTo = null;
+        filterSearch = "";
+    }
+
+    private void ShowAddForm()
+    {
+        editingId = null;
+        showAddForm = true;
+        newTransaction = new NewTransactionModel { Date = DateTime.Today };
+    }
+
+    private void ShowEditForm(TransactionRow r)
+    {
+        editingId = r.TransactionId;
+        pendingDelete = null;
+        showAddForm = true;
+        newTransaction = new NewTransactionModel
+        {
+            AccountId = r.AccountId,
+            Date = r.Date,
+            Description = r.Description,
+            Amount = r.Amount,
+            Payee = r.Payee
+        };
+    }
+
+    private void CancelForm()
+    {
+        showAddForm = false;
+        editingId = null;
+    }
+
+    private async Task AddTransaction()
+    {
+        busy = true;
+        if (editingId is not null)
+        {
+            // Edit = replace the existing transaction (re-categorized) in one transaction.
+            await Ledger.ReplaceTransactionAsync(
+                editingId, newTransaction.Description, newTransaction.Amount, newTransaction.Date, newTransaction.Payee);
+        }
+        else
+        {
+            await using var session = AccountStore.LightweightSession();
+            var account = await session.Events.AggregateStreamAsync<Account>(newTransaction.AccountId);
+            if (account == null) { busy = false; return; }
+
+            var evt = account.RecordTransaction(
+                description: newTransaction.Description,
+                amount: newTransaction.Amount,
+                transactionDate: newTransaction.Date,
+                payee: newTransaction.Payee);
+
+            // Append the account event and its budget projection in one transaction (categorized),
+            // so the transaction can't land in the ledger without its matching expense/income view.
+            await TransactionHandler.RecordAndProjectAsync(session, newTransaction.AccountId, evt);
+            await session.SaveChangesAsync();
+
+            // A manually-added transaction may complete a transfer between own accounts.
+            await Transfers.DetectAsync();
+        }
+
+        showAddForm = false;
+        editingId = null;
+        await Reload();
+        busy = false;
+    }
+
+    private async Task ConfirmDelete(string transactionId)
+    {
+        busy = true;
+        await Ledger.DeleteTransactionAsync(transactionId);
+        pendingDelete = null;
+        await Reload();
+        busy = false;
+    }
+
+    private async Task LoadAccounts()
+    {
+        // Query the inline AccountSummary read model (no event replay).
+        await using var session = AccountStore.QuerySession();
+        accounts = (await session.Query<AccountSummary>().ToListAsync()).ToList();
+    }
+
+    private class NewTransactionModel
+    {
+        public string AccountId { get; set; } = "";
+        public DateTime Date { get; set; }
+        public string Description { get; set; } = "";
+        public decimal Amount { get; set; }
+        public string? Payee { get; set; }
+    }
+}

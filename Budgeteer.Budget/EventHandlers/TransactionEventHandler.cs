@@ -1,0 +1,93 @@
+using Budgeteer.Shared.Events.Accounts;
+using Budgeteer.Shared.Events.Budget;
+using Budgeteer.Budget.Domain;
+using Budgeteer.Budget.Categorization;
+using Marten;
+
+namespace Budgeteer.Budget.EventHandlers;
+
+/// <summary>
+/// Listens to Account domain TransactionRecorded events
+/// and creates corresponding Budget domain events (Expense/Income/Transfer)
+/// This is the integration point between the two domains
+/// </summary>
+public class TransactionEventHandler
+{
+    private readonly IDocumentStore _store;
+    private readonly TransactionCategorizer _categorizer;
+
+    public TransactionEventHandler(IDocumentStore store, TransactionCategorizer categorizer)
+    {
+        _store = store;
+        _categorizer = categorizer;
+    }
+
+    /// <summary>
+    /// Handles TransactionRecorded from Account domain
+    /// Determines if it's an expense, income, or transfer and creates appropriate event
+    /// </summary>
+    public async Task HandleAsync(TransactionRecorded accountEvent)
+    {
+        // Smart categorization: assign a category from the keyword rules up front.
+        var category = await _categorizer.CategorizeAsync(
+            accountEvent.Payee, accountEvent.Description, accountEvent.Amount);
+
+        await using var session = _store.LightweightSession();
+        Project(session, accountEvent, category);
+        await session.SaveChangesAsync();
+    }
+
+    /// <summary>
+    /// Appends the account event and its derived Budget-domain event to the given session WITHOUT
+    /// saving, after resolving the category. Lets a caller (e.g. manual add) commit the account
+    /// stream and the budget projection atomically in one SaveChanges, the same guarantee bulk
+    /// import relies on, so a transaction can never appear in the ledger without its budget view.
+    /// </summary>
+    public async Task RecordAndProjectAsync(IDocumentSession session, string accountId, TransactionRecorded accountEvent)
+    {
+        var rules = await _categorizer.GetRulesAsync();
+        var category = TransactionCategorizer.Match(
+            rules, accountEvent.Payee, accountEvent.Description, accountEvent.Amount);
+
+        session.Events.Append(accountId, accountEvent);
+        Project(session, accountEvent, category);
+    }
+
+    /// <summary>
+    /// Appends the Budget-domain event for a transaction to the given session WITHOUT saving, so the
+    /// caller can commit it atomically alongside the account stream (and avoid a per-transaction
+    /// round trip during bulk import). The <paramref name="category"/> is resolved by the caller.
+    /// Zero-amount transactions are recorded as a (zero) expense so the budget reconciles with the
+    /// transaction list rather than silently dropping them.
+    /// </summary>
+    public void Project(IDocumentSession session, TransactionRecorded accountEvent, string? category)
+    {
+        // Negative or zero amount = expense; positive = income.
+        if (accountEvent.Amount <= 0)
+        {
+            var expenseEvent = Expense.CreateFromTransaction(
+                transactionId: accountEvent.TransactionId,
+                date: accountEvent.TransactionDate,
+                description: accountEvent.Description,
+                amount: accountEvent.Amount,
+                payee: accountEvent.Payee,
+                category: category);
+
+            session.Events.StartStream<Expense>(expenseEvent.ExpenseId, expenseEvent);
+        }
+        else
+        {
+            var incomeEvent = new IncomeRecorded(
+                IncomeId: Guid.NewGuid().ToString(),
+                TransactionId: accountEvent.TransactionId,
+                Date: accountEvent.TransactionDate,
+                Description: accountEvent.Description,
+                Amount: accountEvent.Amount,
+                Category: category,
+                Source: accountEvent.Payee,
+                RecordedAt: DateTime.UtcNow);
+
+            session.Events.StartStream<Income>(incomeEvent.IncomeId, incomeEvent);
+        }
+    }
+}

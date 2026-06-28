@@ -1,0 +1,174 @@
+@page "/reports"
+@rendermode InteractiveServer
+@using Budgeteer.Budget.Insights
+@using Budgeteer.Web.Services
+@inject TransactionQueryService Transactions
+@inject BudgetService BudgetService
+
+<PageTitle>Reports</PageTitle>
+
+<h1>Reports 📈</h1>
+
+<div class="mb-3">
+    <a class="btn btn-outline-primary btn-sm" href="/export/transactions.csv" target="_blank">⬇ Export transactions (CSV)</a>
+</div>
+
+@if (loading)
+{
+    <div class="alert alert-secondary">Loading…</div>
+}
+else
+{
+    <div class="row">
+        <div class="col-lg-6 mb-4">
+            <h4>Monthly cash flow (last 12 months)</h4>
+            @if (months.Count == 0)
+            {
+                <p class="text-muted">No transactions yet.</p>
+            }
+            else
+            {
+                <table class="table table-sm">
+                    <thead><tr><th>Month</th><th class="text-end">Income</th><th class="text-end">Expenses</th><th class="text-end">Net</th></tr></thead>
+                    <tbody>
+                        @foreach (var m in months)
+                        {
+                            var net = m.Income - m.Expense;
+                            <tr>
+                                <td>@m.Month.ToString("MMM yyyy")</td>
+                                <td class="text-end text-success">@m.Income.ToString("N2")</td>
+                                <td class="text-end text-danger">@m.Expense.ToString("N2")</td>
+                                <td class="text-end @(net >= 0 ? "text-success" : "text-danger")">@net.ToString("N2")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+        </div>
+
+        <div class="col-lg-6 mb-4">
+            <h4>Spending by category</h4>
+            <p class="text-muted small">Click a category to see its transactions.</p>
+            @if (categorySpend.Count == 0)
+            {
+                <p class="text-muted">No expenses yet.</p>
+            }
+            else
+            {
+                <table class="table table-sm">
+                    <tbody>
+                        @foreach (var c in categorySpend)
+                        {
+                            <tr style="cursor:pointer" @onclick="@(() => Drill(c.Category))">
+                                <td>@c.Category</td>
+                                <td class="text-end">€@c.Total.ToString("N2")</td>
+                            </tr>
+                            @if (drilled == c.Category)
+                            {
+                                <tr>
+                                    <td colspan="2">
+                                        <table class="table table-sm mb-0">
+                                            <tbody>
+                                                @foreach (var t in CategoryTransactions(c.Category))
+                                                {
+                                                    <tr>
+                                                        <td style="white-space:nowrap">@t.Date.ToShortDateString()</td>
+                                                        <td>@(string.IsNullOrWhiteSpace(t.Payee) ? t.Description : t.Payee)</td>
+                                                        <td class="text-end">€@Math.Abs(t.Amount).ToString("N2")</td>
+                                                    </tr>
+                                                }
+                                            </tbody>
+                                        </table>
+                                    </td>
+                                </tr>
+                            }
+                        }
+                    </tbody>
+                </table>
+            }
+        </div>
+    </div>
+
+    <h4>Recurring payments &amp; subscriptions</h4>
+    @if (recurring.Count == 0)
+    {
+        <p class="text-muted">None detected yet (needs at least three regular charges from the same payee).</p>
+    }
+    else
+    {
+        <p class="text-muted small">
+            Estimated recurring spend: <strong>€@monthlyRecurring.ToString("N2")</strong>/month equivalent.
+        </p>
+        <table class="table table-sm">
+            <thead>
+                <tr><th>Payee</th><th>Cadence</th><th class="text-end">Typical</th><th class="text-end">Last</th><th>Next expected</th></tr>
+            </thead>
+            <tbody>
+                @foreach (var r in recurring)
+                {
+                    <tr>
+                        <td>@r.Payee</td>
+                        <td>@r.Cadence</td>
+                        <td class="text-end">€@r.TypicalAmount.ToString("N2")</td>
+                        <td class="text-end">
+                            €@r.LastAmount.ToString("N2")
+                            @if (r.AmountChanged)
+                            {
+                                <span class="badge bg-warning text-dark" title="Last charge differs from the typical amount">±</span>
+                            }
+                        </td>
+                        <td>@r.NextExpected.ToShortDateString()</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+}
+
+@code {
+    private bool loading = true;
+    private List<TransactionRow> rows = new();
+    private List<(DateTime Month, decimal Income, decimal Expense)> months = new();
+    private List<(string Category, decimal Total)> categorySpend = new();
+    private IReadOnlyList<RecurringPayment> recurring = new List<RecurringPayment>();
+    private decimal monthlyRecurring;
+    private string? drilled;
+
+    protected override async Task OnInitializedAsync()
+    {
+        rows = await Transactions.LoadAllAsync();
+        var flows = rows.Where(r => !r.IsTransfer).ToList();
+
+        months = flows
+            .GroupBy(r => new DateTime(r.Date.Year, r.Date.Month, 1))
+            .Select(g => (Month: g.Key,
+                          Income: g.Where(x => x.Amount > 0).Sum(x => x.Amount),
+                          Expense: -g.Where(x => x.Amount < 0).Sum(x => x.Amount)))
+            .OrderByDescending(m => m.Month)
+            .Take(12)
+            .ToList();
+
+        categorySpend = flows
+            .Where(r => r.Amount < 0)
+            .GroupBy(r => string.IsNullOrWhiteSpace(r.Category) ? "Uncategorized" : r.Category!,
+                StringComparer.OrdinalIgnoreCase)
+            .Select(g => (Category: g.Key, Total: -g.Sum(x => x.Amount)))
+            .OrderByDescending(x => x.Total)
+            .ToList();
+
+        var expenses = await BudgetService.LoadExpensesAsync();
+        recurring = RecurringDetectionService.Detect(expenses);
+        // Normalize each cadence to a monthly figure (30/interval days * amount).
+        monthlyRecurring = recurring.Sum(r => r.IntervalDays > 0 ? r.TypicalAmount * 30m / r.IntervalDays : 0m);
+
+        loading = false;
+    }
+
+    private void Drill(string category) => drilled = drilled == category ? null : category;
+
+    private IEnumerable<TransactionRow> CategoryTransactions(string category) =>
+        rows.Where(r => !r.IsTransfer && r.Amount < 0 &&
+                        (string.IsNullOrWhiteSpace(r.Category) ? "Uncategorized" : r.Category!)
+                            .Equals(category, StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(r => r.Date);
+}

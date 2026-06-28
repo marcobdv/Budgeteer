@@ -1,0 +1,229 @@
+@page "/"
+@rendermode InteractiveServer
+@using Budgeteer.Accounts.ReadModels
+@using Budgeteer.Web.Services
+@inject TransactionQueryService Transactions
+@inject BankImportService ImportService
+@inject SavingGoalService GoalService
+
+<PageTitle>Budgeteer - Dashboard</PageTitle>
+
+<h1>Dashboard 📊</h1>
+
+@if (loading)
+{
+    <div class="alert alert-secondary">Loading…</div>
+}
+else if (rows.Count == 0 && accounts.Count == 0)
+{
+    <div class="alert alert-info mt-3">
+        Nothing here yet. <a href="/accounts">Create an account</a> or
+        <a href="/import">import a bank export</a> to get started.
+    </div>
+}
+else
+{
+    <div class="row g-3 mt-1 mb-4">
+        <div class="col-md-3">
+            <div class="card text-bg-light h-100"><div class="card-body">
+                <h6 class="text-muted">Total balance</h6>
+                <h3 class="@(totalBalance >= 0 ? "text-success" : "text-danger")">€@totalBalance.ToString("N2")</h3>
+                <small class="text-muted">@accounts.Count account(s)</small>
+            </div></div>
+        </div>
+        <div class="col-md-3">
+            <div class="card text-bg-light h-100"><div class="card-body">
+                <h6 class="text-muted">Income</h6>
+                <h3 class="text-success">€@income.ToString("N2")</h3>
+            </div></div>
+        </div>
+        <div class="col-md-3">
+            <div class="card text-bg-light h-100"><div class="card-body">
+                <h6 class="text-muted">Expenses</h6>
+                <h3 class="text-danger">€@expenses.ToString("N2")</h3>
+            </div></div>
+        </div>
+        <div class="col-md-3">
+            <div class="card text-bg-light h-100"><div class="card-body">
+                <h6 class="text-muted">Net</h6>
+                <h3 class="@((income - expenses) >= 0 ? "text-success" : "text-danger")">€@((income - expenses).ToString("N2"))</h3>
+                <small class="text-muted">@rows.Count transaction(s)</small>
+            </div></div>
+        </div>
+    </div>
+
+    @if (goals.Count > 0)
+    {
+        <h4>Saving goals</h4>
+        <div class="row mb-4">
+            @foreach (var p in goals)
+            {
+                <div class="col-md-4 mb-2">
+                    <div class="card"><div class="card-body py-2">
+                        <div class="d-flex justify-content-between">
+                            <span>@p.Goal.Name</span>
+                            <small class="text-muted">€@p.Current.ToString("N0") / €@p.Target.ToString("N0")</small>
+                        </div>
+                        <div class="progress mt-1" style="height:14px">
+                            <div class="progress-bar @(p.Reached ? "bg-success" : "bg-info")" style="width:@p.Percent.ToString("F0")%"></div>
+                        </div>
+                    </div></div>
+                </div>
+            }
+        </div>
+    }
+
+    <div class="row">
+        <div class="col-lg-7 mb-4">
+            <h4>Monthly cash flow</h4>
+            @if (months.Count == 0)
+            {
+                <p class="text-muted">No transactions yet.</p>
+            }
+            else
+            {
+                <table class="table table-sm align-middle">
+                    <thead><tr><th>Month</th><th class="text-end">In</th><th class="text-end">Out</th><th class="text-end">Net</th><th style="width:30%"></th></tr></thead>
+                    <tbody>
+                        @foreach (var m in months)
+                        {
+                            var net = m.Income - m.Expense;
+                            <tr>
+                                <td>@m.Month.ToString("MMM yyyy")</td>
+                                <td class="text-end text-success">@m.Income.ToString("N0")</td>
+                                <td class="text-end text-danger">@m.Expense.ToString("N0")</td>
+                                <td class="text-end @(net >= 0 ? "text-success" : "text-danger")">@net.ToString("N0")</td>
+                                <td>
+                                    <div class="progress" style="height:16px; background:#eee">
+                                        <div class="progress-bar bg-success" style="width:@BarPct(m.Income)%"></div>
+                                    </div>
+                                    <div class="progress mt-1" style="height:16px; background:#eee">
+                                        <div class="progress-bar bg-danger" style="width:@BarPct(m.Expense)%"></div>
+                                    </div>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+                <small class="text-muted">Green = income, red = expenses (scaled to the largest month).</small>
+            }
+
+            <h4 class="mt-4">Accounts</h4>
+            <ul class="list-group">
+                @foreach (var a in accounts.OrderByDescending(x => x.Balance))
+                {
+                    <li class="list-group-item d-flex justify-content-between">
+                        <span>@a.Name @(string.IsNullOrWhiteSpace(a.Iban) ? "" : $"· {a.Iban}")</span>
+                        <span class="@(a.Balance >= 0 ? "text-success" : "text-danger")">€@a.Balance.ToString("N2")</span>
+                    </li>
+                }
+            </ul>
+        </div>
+
+        <div class="col-lg-5 mb-4">
+            <h4>Top spending categories</h4>
+            @if (topCategories.Count == 0)
+            {
+                <p class="text-muted">No expenses yet.</p>
+            }
+            else
+            {
+                <table class="table table-sm">
+                    <tbody>
+                        @foreach (var c in topCategories)
+                        {
+                            <tr>
+                                <td>@c.Category</td>
+                                <td>
+                                    <div class="progress" style="height:18px">
+                                        <div class="progress-bar bg-info" style="width:@CatPct(c.Total)%"></div>
+                                    </div>
+                                </td>
+                                <td class="text-end">€@c.Total.ToString("N0")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+                <a href="/budget" class="btn btn-sm btn-outline-primary">Full budget →</a>
+            }
+
+            <h4 class="mt-4">Recent transactions</h4>
+            <table class="table table-sm">
+                <tbody>
+                    @foreach (var r in rows.Take(10))
+                    {
+                        <tr>
+                            <td style="white-space:nowrap">@r.Date.ToString("dd MMM")</td>
+                            <td>@(string.IsNullOrWhiteSpace(r.Payee) ? r.Description : r.Payee)
+                                @if (r.IsTransfer)
+                                {
+                                    <span class="badge bg-secondary">Transfer</span>
+                                }
+                                else if (!string.IsNullOrWhiteSpace(r.Category))
+                                {
+                                    <span class="badge bg-light text-dark border">@r.Category</span>
+                                }
+                            </td>
+                            <td class="text-end @(r.Amount >= 0 ? "text-success" : "text-danger")">@r.Amount.ToString("N2")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+            <a href="/transactions" class="btn btn-sm btn-outline-primary">All transactions →</a>
+        </div>
+    </div>
+}
+
+@code {
+    private bool loading = true;
+    private List<TransactionRow> rows = new();
+    private List<AccountSummary> accounts = new();
+    private decimal totalBalance, income, expenses;
+    private List<(DateTime Month, decimal Income, decimal Expense)> months = new();
+    private decimal maxMonthFlow = 1m;
+    private List<(string Category, decimal Total)> topCategories = new();
+    private decimal maxCategoryTotal = 1m;
+    private List<GoalProgress> goals = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        rows = await Transactions.LoadAllAsync();
+        accounts = await ImportService.LoadAccountsAsync();
+        goals = (await GoalService.GetAllAsync())
+            .Select(g => SavingGoalService.Progress(g, accounts))
+            .OrderByDescending(p => p.Percent)
+            .Take(3)
+            .ToList();
+
+        totalBalance = accounts.Sum(a => a.Balance);
+
+        // Transfers between own accounts are neither income nor expense.
+        var flows = rows.Where(r => !r.IsTransfer).ToList();
+        income = flows.Where(r => r.Amount > 0).Sum(r => r.Amount);
+        expenses = -flows.Where(r => r.Amount < 0).Sum(r => r.Amount);
+
+        months = flows
+            .GroupBy(r => new DateTime(r.Date.Year, r.Date.Month, 1))
+            .Select(g => (Month: g.Key,
+                          Income: g.Where(x => x.Amount > 0).Sum(x => x.Amount),
+                          Expense: -g.Where(x => x.Amount < 0).Sum(x => x.Amount)))
+            .OrderByDescending(m => m.Month)
+            .Take(6)
+            .ToList();
+        maxMonthFlow = months.Count == 0 ? 1m : Math.Max(1m, months.Max(m => Math.Max(m.Income, m.Expense)));
+
+        topCategories = flows
+            .Where(r => r.Amount < 0)
+            .GroupBy(r => string.IsNullOrWhiteSpace(r.Category) ? "Uncategorized" : r.Category!)
+            .Select(g => (Category: g.Key, Total: -g.Sum(x => x.Amount)))
+            .OrderByDescending(x => x.Total)
+            .Take(6)
+            .ToList();
+        maxCategoryTotal = topCategories.Count == 0 ? 1m : Math.Max(1m, topCategories.Max(c => c.Total));
+
+        loading = false;
+    }
+
+    private string BarPct(decimal value) => ((double)(value / maxMonthFlow) * 100).ToString("F0");
+    private string CatPct(decimal value) => ((double)(value / maxCategoryTotal) * 100).ToString("F0");
+}

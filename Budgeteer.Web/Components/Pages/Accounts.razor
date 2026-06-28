@@ -1,0 +1,159 @@
+@page "/accounts"
+@rendermode InteractiveServer
+@using Budgeteer.Accounts.Domain
+@using Budgeteer.Accounts.ReadModels
+@using Budgeteer.Shared.Events.Accounts
+@using Budgeteer.Web.Services
+@using Marten
+@inject IDocumentStore AccountStore
+@inject LedgerService Ledger
+
+<PageTitle>Accounts</PageTitle>
+
+<h1>Bank Accounts</h1>
+
+<div class="mb-3">
+    <button class="btn btn-primary" @onclick="ShowCreateForm">Create Account</button>
+</div>
+
+@if (showCreateForm)
+{
+    <div class="card mb-4">
+        <div class="card-body">
+            <h5 class="card-title">Create New Account</h5>
+            <EditForm Model="newAccount" OnValidSubmit="CreateAccount">
+                <div class="mb-3">
+                    <label class="form-label">Account Name</label>
+                    <InputText class="form-control" @bind-Value="newAccount.Name" />
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Account Type</label>
+                    <InputSelect class="form-control" @bind-Value="newAccount.AccountType">
+                        <option value="Checking">Checking</option>
+                        <option value="Savings">Savings</option>
+                        <option value="Credit Card">Credit Card</option>
+                    </InputSelect>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">IBAN (optional)</label>
+                    <InputText class="form-control" @bind-Value="newAccount.Iban" placeholder="NL11RABO0123456789" />
+                    <small class="text-muted">Used to match imported bank mutations to this account.</small>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Initial Balance</label>
+                    <InputNumber class="form-control" @bind-Value="newAccount.InitialBalance" />
+                </div>
+                <button type="submit" class="btn btn-success">Create</button>
+                <button type="button" class="btn btn-secondary" @onclick="@(() => showCreateForm = false)">Cancel</button>
+            </EditForm>
+        </div>
+    </div>
+}
+
+@if (accounts.Any())
+{
+    <div class="row">
+        @foreach (var account in accounts)
+        {
+            <div class="col-md-4 mb-3">
+                <div class="card">
+                    <div class="card-body">
+                        <h5 class="card-title">@account.Name</h5>
+                        <p class="card-text">
+                            <span class="badge bg-secondary">@account.AccountType</span>
+                            @if (!string.IsNullOrWhiteSpace(account.Iban))
+                            {
+                                <br /><small class="text-muted">@account.Iban</small>
+                            }
+                        </p>
+                        <h3 class="@(account.Balance >= 0 ? "text-success" : "text-danger")">
+                            €@account.Balance.ToString("N2")
+                        </h3>
+                        <small class="text-muted">Created: @account.CreatedAt.ToShortDateString()</small>
+                        <br />
+                        <small class="text-muted">Transactions: @account.TransactionCount</small>
+                        <div class="mt-2">
+                            @if (pendingDelete == account.Id)
+                            {
+                                <span class="text-danger small me-1">Delete this account and all its transactions?</span>
+                                <button class="btn btn-danger btn-sm" @onclick="@(() => ConfirmDelete(account.Id))" disabled="@busy">Yes, delete</button>
+                                <button class="btn btn-outline-secondary btn-sm" @onclick="@(() => pendingDelete = null)">Cancel</button>
+                            }
+                            else
+                            {
+                                <button class="btn btn-outline-danger btn-sm" @onclick="@(() => pendingDelete = account.Id)" disabled="@busy">Delete</button>
+                            }
+                        </div>
+                    </div>
+                </div>
+            </div>
+        }
+    </div>
+}
+else
+{
+    <div class="alert alert-info">
+        No accounts yet. Create your first account to get started!
+    </div>
+}
+
+@code {
+    private List<AccountSummary> accounts = new();
+    private bool showCreateForm = false;
+    private NewAccountModel newAccount = new();
+    private string? pendingDelete;
+    private bool busy;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAccounts();
+    }
+
+    private void ShowCreateForm()
+    {
+        showCreateForm = true;
+        newAccount = new NewAccountModel();
+    }
+
+    private async Task CreateAccount()
+    {
+        await using var session = AccountStore.LightweightSession();
+
+        var evt = Account.Create(
+            name: newAccount.Name,
+            accountType: newAccount.AccountType,
+            initialBalance: newAccount.InitialBalance,
+            iban: newAccount.Iban
+        );
+
+        session.Events.StartStream<Account>(evt.AccountId, evt);
+        await session.SaveChangesAsync();
+
+        showCreateForm = false;
+        await LoadAccounts();
+    }
+
+    private async Task LoadAccounts()
+    {
+        // Query the inline AccountSummary read model (no event replay).
+        await using var session = AccountStore.QuerySession();
+        accounts = (await session.Query<AccountSummary>().ToListAsync()).ToList();
+    }
+
+    private async Task ConfirmDelete(string accountId)
+    {
+        busy = true;
+        await Ledger.DeleteAccountAsync(accountId);
+        pendingDelete = null;
+        await LoadAccounts();
+        busy = false;
+    }
+
+    private class NewAccountModel
+    {
+        public string Name { get; set; } = "";
+        public string AccountType { get; set; } = "Checking";
+        public string Iban { get; set; } = "";
+        public decimal InitialBalance { get; set; } = 0;
+    }
+}

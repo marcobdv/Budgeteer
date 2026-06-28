@@ -1,0 +1,183 @@
+@page "/goals"
+@rendermode InteractiveServer
+@using Budgeteer.Accounts.ReadModels
+@using Budgeteer.Budget.Budgeting
+@using Budgeteer.Web.Services
+@inject SavingGoalService GoalService
+@inject BankImportService ImportService
+
+<PageTitle>Saving Goals</PageTitle>
+
+<h1>Saving Goals 🎯</h1>
+<p class="text-muted">Track progress toward a target — linked to an account's balance, or tracked manually.</p>
+
+<div class="card mb-4">
+    <div class="card-body">
+        <h5 class="card-title">New goal</h5>
+        <div class="row g-2 align-items-end">
+            <div class="col-md-3">
+                <label class="form-label mb-0">Name</label>
+                <input class="form-control form-control-sm" @bind="draft.Name" placeholder="Emergency fund" />
+            </div>
+            <div class="col-md-2">
+                <label class="form-label mb-0">Target €</label>
+                <input type="number" min="0" step="100" class="form-control form-control-sm" @bind="draft.TargetAmount" />
+            </div>
+            <div class="col-md-2">
+                <label class="form-label mb-0">Target date</label>
+                <input type="date" class="form-control form-control-sm" @bind="draft.TargetDate" />
+            </div>
+            <div class="col-md-3">
+                <label class="form-label mb-0">Track</label>
+                <select class="form-select form-select-sm" @bind="draft.LinkedAccountId">
+                    <option value="">Manually</option>
+                    @foreach (var a in accounts)
+                    {
+                        <option value="@a.Id">@a.Name balance</option>
+                    }
+                </select>
+            </div>
+            @if (string.IsNullOrEmpty(draft.LinkedAccountId))
+            {
+                <div class="col-md-2">
+                    <label class="form-label mb-0">Saved so far €</label>
+                    <input type="number" min="0" step="50" class="form-control form-control-sm" @bind="draft.ManualAmount" />
+                </div>
+            }
+            <div class="col-md-2">
+                <button class="btn btn-success btn-sm w-100" @onclick="AddGoal" disabled="@busy">Add goal</button>
+            </div>
+        </div>
+        @if (error is not null)
+        {
+            <div class="text-danger small mt-2">@error</div>
+        }
+    </div>
+</div>
+
+@if (progress.Count == 0)
+{
+    <div class="alert alert-info">No goals yet. Create one above.</div>
+}
+else
+{
+    <div class="row">
+        @foreach (var p in progress)
+        {
+            <div class="col-md-6 mb-3">
+                <div class="card">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between">
+                            <h5 class="card-title">@p.Goal.Name</h5>
+                            <button class="btn btn-sm btn-outline-danger" @onclick="@(() => Delete(p.Goal.Id))" disabled="@busy">✕</button>
+                        </div>
+                        <div class="progress mb-2" style="height:22px">
+                            <div class="progress-bar @(p.Reached ? "bg-success" : "bg-info")" style="width:@p.Percent.ToString("F0")%">
+                                @p.Percent.ToString("F0")%
+                            </div>
+                        </div>
+                        <p class="mb-1">
+                            <strong>€@p.Current.ToString("N2")</strong> of €@p.Target.ToString("N2")
+                            @if (p.Reached)
+                            {
+                                <span class="badge bg-success">Reached 🎉</span>
+                            }
+                            else
+                            {
+                                <span class="text-muted">· €@p.Remaining.ToString("N2") to go</span>
+                            }
+                        </p>
+                        @if (p.Goal.TargetDate is { } d)
+                        {
+                            <small class="text-muted">
+                                By @d.ToShortDateString()
+                                @{ var need = p.MonthlyNeeded(today); }
+                                @if (need is { } n)
+                                {
+                                    <span>· save <strong>€@n.ToString("N2")</strong>/month</span>
+                                }
+                                else if (!p.Reached)
+                                {
+                                    <span class="text-danger">· date passed</span>
+                                }
+                            </small>
+                            <br />
+                        }
+                        @if (string.IsNullOrEmpty(p.Goal.LinkedAccountId))
+                        {
+                            <div class="input-group input-group-sm mt-2" style="max-width:260px">
+                                <span class="input-group-text">Saved €</span>
+                                <input type="number" min="0" step="50" class="form-control"
+                                       value="@p.Goal.ManualAmount"
+                                       @onchange="@(args => UpdateManual(p.Goal, args.Value?.ToString()))" />
+                            </div>
+                        }
+                        else
+                        {
+                            <small class="text-muted">Tracking @AccountName(p.Goal.LinkedAccountId) balance</small>
+                        }
+                    </div>
+                </div>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    private readonly DateTime today = DateTime.Today;
+    private List<AccountSummary> accounts = new();
+    private List<GoalProgress> progress = new();
+    private SavingGoal draft = new();
+    private bool busy;
+    private string? error;
+
+    protected override async Task OnInitializedAsync() => await Load();
+
+    private async Task Load()
+    {
+        accounts = await ImportService.LoadAccountsAsync();
+        var goals = await GoalService.GetAllAsync();
+        progress = goals
+            .Select(g => SavingGoalService.Progress(g, accounts))
+            .OrderByDescending(p => p.Percent)
+            .ToList();
+    }
+
+    private async Task AddGoal()
+    {
+        error = null;
+        if (string.IsNullOrWhiteSpace(draft.Name) || draft.TargetAmount <= 0)
+        {
+            error = "Give the goal a name and a target amount greater than zero.";
+            return;
+        }
+        busy = true;
+        draft.CreatedAt = DateTime.UtcNow;
+        if (string.IsNullOrWhiteSpace(draft.LinkedAccountId))
+            draft.LinkedAccountId = null;
+        await GoalService.SaveAsync(draft);
+        draft = new SavingGoal();
+        await Load();
+        busy = false;
+    }
+
+    private async Task UpdateManual(SavingGoal goal, string? raw)
+    {
+        decimal.TryParse(raw, System.Globalization.NumberStyles.Number,
+            System.Globalization.CultureInfo.InvariantCulture, out var amount);
+        goal.ManualAmount = amount;
+        await GoalService.SaveAsync(goal);
+        await Load();
+    }
+
+    private async Task Delete(string id)
+    {
+        busy = true;
+        await GoalService.DeleteAsync(id);
+        await Load();
+        busy = false;
+    }
+
+    private string AccountName(string? id) =>
+        accounts.FirstOrDefault(a => a.Id == id)?.Name ?? "account";
+}
