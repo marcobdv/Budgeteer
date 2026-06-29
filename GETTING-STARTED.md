@@ -76,11 +76,8 @@ dotnet run
 
 **Option B: pgAdmin or SQL Client**
 ```sql
--- Connect to accounts database
-SELECT * FROM accounts.mt_events ORDER BY timestamp DESC;
-
--- Connect to budget database  
-SELECT * FROM budget.mt_events ORDER BY timestamp DESC;
+-- Connect to the accounts-eventstore database. Both domains' events live in one store.
+SELECT * FROM mt_events ORDER BY timestamp DESC;
 ```
 
 ## 🐛 Debugging
@@ -104,34 +101,34 @@ In Aspire Dashboard:
 
 ## 📊 Understanding the Architecture
 
-### Two Independent Domains
+### Two Domains, One Store
 
-```
-Account Domain (PostgreSQL #1)
-├── Manages accounts
-├── Records transactions
-└── Events: AccountCreated, TransactionRecorded
+Both domains are separate code modules but append to the same Marten event store.
 
-Budget Domain (PostgreSQL #2)
-├── Processes expenses/income
-├── Categorizes spending
-└── Events: ExpenseRecorded, IncomeRecorded
+```mermaid
+flowchart LR
+    subgraph Acct["Account domain"]
+        a1["Manages accounts"]
+        a2["Records transactions"]
+        a3["Events: AccountCreated,<br/>TransactionRecorded"]
+    end
+    subgraph Bud["Budget domain"]
+        b1["Processes expenses / income"]
+        b2["Categorizes spending"]
+        b3["Events: ExpenseRecorded,<br/>IncomeRecorded"]
+    end
+    Acct --> ES[("Marten event store<br/>PostgreSQL · accounts-eventstore")]
+    Bud --> ES
 ```
 
 ### Event Flow
 
-```
-User adds transaction
-    ↓
-AccountAggregate.RecordTransaction()
-    ↓
-TransactionRecorded event → accounts DB
-    ↓
-[In-process handler]
-    ↓
-TransactionEventHandler.HandleAsync()
-    ↓
-ExpenseRecorded event → budget DB
+```mermaid
+flowchart TB
+    U["User adds transaction"] --> R["Account.RecordTransaction()"]
+    R --> T["TransactionRecorded → event store"]
+    T --> H["TransactionEventHandler.HandleAsync()<br/>(in-process)"]
+    H --> E["ExpenseRecorded / IncomeRecorded → same store"]
 ```
 
 ## ⚡ Quick Commands Reference

@@ -5,12 +5,21 @@
     <ProjectReference Include="..\Budgeteer.Accounts\Budgeteer.Accounts.csproj" />
     <ProjectReference Include="..\Budgeteer.Budget\Budgeteer.Budget.csproj" />
     <ProjectReference Include="..\Budgeteer.Shared\Budgeteer.Shared.csproj" />
+    <!-- Build-order dependency only: the advisor launches the MCP search server from the server's
+         own output directory (which has its dependencies), so we don't copy its bare DLL here. -->
+    <ProjectReference Include="..\Budgeteer.SearchMcp\Budgeteer.SearchMcp.csproj"
+                      ReferenceOutputAssembly="false" Private="false" />
   </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Marten" Version="8.17.0" />
     <PackageReference Include="Marten.AspNetCore" Version="8.17.0" />
     <PackageReference Include="Npgsql" Version="10.0.1" />
+    <!-- Microsoft Agent Framework + its first-party Anthropic (Claude) provider. -->
+    <PackageReference Include="Microsoft.Agents.AI" Version="1.0.0-*" />
+    <PackageReference Include="Microsoft.Agents.AI.Anthropic" Version="1.0.0-*" />
+    <!-- MCP client: connects the advisor agent to the Budgeteer.SearchMcp server. -->
+    <PackageReference Include="ModelContextProtocol" Version="0.*-*" />
   </ItemGroup>
 
   <PropertyGroup>

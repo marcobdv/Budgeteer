@@ -1,0 +1,141 @@
+@page "/advisor"
+@rendermode InteractiveServer
+@using Budgeteer.Web.Services.Advisor
+@inject FinancialAdvisorAgent AdvisorAgent
+
+<PageTitle>Financial Advisor</PageTitle>
+
+<h1>Financial Advisor</h1>
+<p class="text-muted">
+    Ask about your spending, budgets, saving goals, subscriptions, or cash flow.
+    The advisor reads your live Budgeteer data to answer.
+</p>
+
+@if (!AdvisorAgent.IsConfigured)
+{
+    <div class="alert alert-warning">
+        <h5 class="alert-heading">AI advisor is not configured</h5>
+        <p class="mb-1">
+            Set an Anthropic API key so the advisor can run. Either set the
+            <code>ANTHROPIC_API_KEY</code> environment variable, or add an
+            <code>Anthropic:ApiKey</code> entry to configuration (e.g. user-secrets).
+        </p>
+        <p class="mb-0 small text-muted">
+            The model defaults to <code>claude-opus-4-8</code>; override it with <code>Anthropic:Model</code>.
+        </p>
+    </div>
+}
+else
+{
+    <div class="card mb-3">
+        <div class="card-body" style="max-height: 60vh; overflow-y: auto;" @ref="_scrollAnchor">
+            @if (_messages.Count == 0)
+            {
+                <div class="text-muted">
+                    <p>Try asking:</p>
+                    <div class="d-flex flex-wrap gap-2">
+                        @foreach (var s in Suggestions)
+                        {
+                            <button class="btn btn-sm btn-outline-secondary" @onclick="@(() => SendSuggestion(s))" disabled="@_busy">
+                                @s
+                            </button>
+                        }
+                    </div>
+                </div>
+            }
+            @foreach (var m in _messages)
+            {
+                <div class="mb-3 d-flex @(m.IsUser ? "justify-content-end" : "justify-content-start")">
+                    <div class="p-2 px-3 rounded @(m.IsUser ? "bg-primary text-white" : "bg-light border")"
+                         style="max-width: 80%; white-space: pre-wrap;">
+                        @m.Text
+                    </div>
+                </div>
+            }
+            @if (_busy)
+            {
+                <div class="text-muted small"><span class="spinner-border spinner-border-sm me-1"></span> Thinking…</div>
+            }
+        </div>
+    </div>
+
+    @if (_error is not null)
+    {
+        <div class="alert alert-danger py-2">@_error</div>
+    }
+
+    <div class="input-group">
+        <input class="form-control" placeholder="Ask your financial advisor…" @bind="_input"
+               @bind:event="oninput" @onkeydown="OnKeyDown" disabled="@_busy" />
+        <button class="btn btn-primary" @onclick="Send" disabled="@(_busy || string.IsNullOrWhiteSpace(_input))">
+            Send
+        </button>
+        <button class="btn btn-outline-secondary" @onclick="Reset" disabled="@(_busy || _messages.Count == 0)">
+            New chat
+        </button>
+    </div>
+}
+
+@code {
+    private static readonly string[] Suggestions =
+    {
+        "Where does my money go?",
+        "Am I overspending on any budget?",
+        "How am I doing on my saving goals?",
+        "What subscriptions am I paying for?",
+        "Summarize my cash flow this quarter."
+    };
+
+    private sealed record ChatMessage(string Text, bool IsUser);
+
+    private readonly List<ChatMessage> _messages = new();
+    private string _input = "";
+    private bool _busy;
+    private string? _error;
+    private ElementReference _scrollAnchor;
+
+    private async Task OnKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !_busy && !string.IsNullOrWhiteSpace(_input))
+            await Send();
+    }
+
+    private async Task SendSuggestion(string text)
+    {
+        _input = text;
+        await Send();
+    }
+
+    private async Task Send()
+    {
+        var question = _input.Trim();
+        if (string.IsNullOrWhiteSpace(question) || _busy)
+            return;
+
+        _error = null;
+        _input = "";
+        _messages.Add(new ChatMessage(question, IsUser: true));
+        _busy = true;
+
+        try
+        {
+            var answer = await AdvisorAgent.AskAsync(question);
+            _messages.Add(new ChatMessage(answer, IsUser: false));
+        }
+        catch (Exception ex)
+        {
+            _error = $"The advisor could not answer: {ex.Message}";
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private void Reset()
+    {
+        _messages.Clear();
+        _error = null;
+        AdvisorAgent.ResetConversation();
+    }
+}

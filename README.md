@@ -4,26 +4,33 @@ A personal budgeting application demonstrating **Domain-Driven Design** with **E
 
 ## 🏗️ Architecture Overview
 
-### Dual-Domain Event-Sourced Architecture
+### Two Domains, One Event Store
 
+The codebase keeps two clearly separated domain modules (Accounts and Budget), but both
+append to a **single Marten event store** on PostgreSQL (`accounts-eventstore`). An in-process
+handler turns account activity into budget events, and inline projections keep the read models
+that the UI and the AI advisor query.
+
+```mermaid
+flowchart TB
+    subgraph domains["Domain modules"]
+        A["Account domain<br/>(Budgeteer.Accounts)<br/>Account aggregate"]
+        B["Budget domain<br/>(Budgeteer.Budget)<br/>Expense / Income aggregates"]
+    end
+    A -- "TransactionRecorded<br/>→ in-process handler" --> B
+    A --> ES[("Marten event store<br/>PostgreSQL · accounts-eventstore")]
+    B --> ES
+    ES --> RM["Inline read-model projections<br/>AccountSummary · ExpenseView<br/>Income · TransactionView"]
+    RM --> UI["Blazor Server UI<br/>(Budgeteer.Web)"]
+    UI --> ADV["AI Financial Advisor<br/>MAF agent + Claude"]
+    ADV -. "read-only tool calls" .-> RM
+    ADV -- "MCP over stdio" --> MCP["Budgeteer.SearchMcp<br/>web_search tool"]
+    MCP -- "HTTPS" --> TAV["Tavily Search API"]
 ```
-┌─────────────────────┐         ┌─────────────────────┐
-│  Account Domain     │         │   Budget Domain     │
-│                     │         │                     │
-│  ┌───────────────┐  │         │  ┌───────────────┐  │
-│  │ Account       │  │         │  │ Expense       │  │
-│  │ Aggregate     │  │         │  │ Aggregate     │  │
-│  └───────────────┘  │         │  └───────────────┘  │
-│                     │         │                     │
-│  Event Store:       │         │  Event Store:       │
-│  PostgreSQL DB 1    │───────▶ │  PostgreSQL DB 2    │
-│                     │ Events  │                     │
-└─────────────────────┘         └─────────────────────┘
-         │                               │
-         └───────────────┬───────────────┘
-                         │
-                    Blazor Web UI
-```
+
+> The `Budgeteer.AppHost` orchestrator still provisions a second PostgreSQL database
+> (`budget-eventstore`) from the original dual-store design, but the application currently
+> connects only to `accounts-eventstore`.
 
 ### Domain Separation
 
@@ -44,26 +51,37 @@ A personal budgeting application demonstrating **Domain-Driven Design** with **E
   - `IncomeRecorded`
   - `TransferRecorded`
   - `ExpenseCategorized`
-- **Event Store**: PostgreSQL (`budget-eventstore`)
+- **Event Store**: shares the single Marten store (`accounts-eventstore`)
 
 ### Event Flow
 
-```
-1. User adds transaction → Account.TransactionRecorded
-2. [In-Process Event Handler]
-3. Budget.ExpenseRecorded (if negative amount)
-   OR Budget.IncomeRecorded (if positive amount)
-4. Both events persisted in separate event stores
-5. UI projections query both domains
+```mermaid
+sequenceDiagram
+    actor User
+    participant Acct as Account domain
+    participant Store as Marten event store
+    participant Handler as TransactionEventHandler
+    participant Budget as Budget domain
+    User->>Acct: Add / import transaction
+    Acct->>Store: TransactionRecorded
+    Store-->>Handler: event (in-process)
+    alt amount < 0
+        Handler->>Budget: ExpenseRecorded
+    else amount > 0
+        Handler->>Budget: IncomeRecorded
+    end
+    Budget->>Store: persist (same store)
+    Note over Store: inline projections refresh the read models
 ```
 
 ## 🚀 Getting Started
 
 ### Prerequisites
 
-- .NET 8 SDK
+- .NET 9 SDK
 - Docker Desktop (for PostgreSQL via Aspire)
 - IDE (Visual Studio 2022, Rider, or VS Code)
+- *(optional)* an Anthropic API key for the AI advisor, and a Tavily key for its web search
 
 ### Running the Application
 
@@ -115,14 +133,21 @@ Budgeteer/
 │   └── EventHandlers/
 │       └── TransactionEventHandler.cs  # Subscribes to Account events
 │
+├── Budgeteer.SearchMcp/            # MCP server (stdio) exposing a web_search tool
+│   ├── Program.cs                  # Hosts the MCP server
+│   └── WebSearchTools.cs           # Tavily-backed web_search tool
+│
 └── Budgeteer.Web/                  # Blazor Server UI
     ├── Components/
     │   ├── Pages/
     │   │   ├── Home.razor
     │   │   ├── Accounts.razor
-    │   │   └── Transactions.razor
+    │   │   ├── Transactions.razor
+    │   │   └── Advisor.razor       # AI advisor chat page
     │   └── Layout/
-    ├── Program.cs                  # Configures dual Marten stores
+    ├── Services/
+    │   └── Advisor/                # MAF agent, its read-only tools, MCP client
+    ├── Program.cs                  # Configures the single Marten store + DI
     └── Budgeteer.Web.csproj
 ```
 
@@ -244,14 +269,49 @@ category from `ExpenseView` / `Income` at query time, so re-categorizations are 
   / quarterly / yearly) from the same payee are surfaced on Reports with the typical amount, next
   expected date, and a flag when the latest charge changed.
 
+## 🤖 AI Financial Advisor
+
+The **Advisor** page (`/advisor`) is a chat assistant that answers questions about *your* money —
+"where does my money go?", "am I overspending?", "is there a cheaper alternative to this bill?".
+It is built on the **Microsoft Agent Framework (MAF)** with **Claude** as the model (MAF's
+first-party Anthropic provider).
+
+- **Grounded in your data** — the agent never invents figures. It calls read-only tools
+  (`Budgeteer.Web/Services/Advisor/FinancialAdvisorTools.cs`) that wrap the existing read models:
+  balances, spending-by-category, budget status & month-end projection, saving goals, recurring
+  payments, cash-flow trend, largest transactions, spend-for-payee, category drill-down, and
+  unusual / uncategorized transactions.
+- **Web research over MCP** — a separate **Model Context Protocol** server, `Budgeteer.SearchMcp`,
+  exposes a `web_search` tool (backed by the [Tavily](https://tavily.com) API). The advisor connects
+  to it over stdio, so it can look up real-world options — e.g. read your recurring Vodafone charge,
+  search for cheaper Dutch SIM-only plans, and estimate the annual saving.
+- **Graceful by default** — with no `ANTHROPIC_API_KEY` the page shows a setup notice instead of
+  failing; with no Tavily key the advisor still answers from your data and just can't search the web.
+
+```mermaid
+flowchart LR
+    U["You (chat)"] --> AG["MAF agent (Claude)"]
+    AG -- "read-only tools" --> RM["Budgeteer read models"]
+    AG -- "MCP / stdio" --> S["Budgeteer.SearchMcp"]
+    S -- "HTTPS" --> T["Tavily Search API"]
+```
+
+**Enabling it:** set `ANTHROPIC_API_KEY` (or config `Anthropic:ApiKey`); the model defaults to
+`claude-opus-4-8` (override with `Anthropic:Model`). For web search, set `TAVILY_API_KEY` (or config
+`Tavily:ApiKey`).
+
 ## 🎯 Key Design Decisions
 
-### Why Separate Event Stores?
+### Why a Single Event Store (with separate domains)?
 
-1. **Domain Isolation**: Each domain owns its data completely
-2. **Independent Evolution**: Domains can evolve schemas independently
-3. **Clear Boundaries**: Prevents coupling between domains
-4. **Scalability**: Could split to microservices without refactoring
+The Accounts and Budget domains stay separate as **code modules** (own aggregates, events, and read
+models), but share one Marten store for simplicity:
+
+1. **Domain Isolation**: Each domain owns its aggregates, events, and read models
+2. **Simple Operations**: One database to provision, back up, and migrate for the MVP
+3. **Clear Boundaries**: Cross-domain flow is explicit, via the in-process event handler
+4. **Room to Grow**: The module boundaries leave the door open to split into separate stores
+   (or services) later without reshaping the domain code
 
 ### Why Marten?
 
@@ -292,6 +352,7 @@ Rebuild Budget domain from Account events for disaster recovery
 - ✅ Saving / financial goals
 - ✅ Edit / undo / delete (transactions, accounts, imports)
 - ✅ Reports, CSV export, statement reconciliation, recurring detection
+- ✅ AI financial advisor (MAF + Claude) with MCP-backed web search
 
 ### Phase 2 (Future)
 - Add message broker (RabbitMQ/Redis)
@@ -308,10 +369,12 @@ Rebuild Budget domain from Account events for disaster recovery
 
 ## 🛠️ Technologies
 
-- **.NET 8** - Modern C# 
+- **.NET 9** - Modern C#
 - **Blazor Server** - Interactive web UI
 - **Marten** - Event sourcing on PostgreSQL
 - **.NET Aspire** - Cloud-ready app orchestration
+- **Microsoft Agent Framework + Claude** - AI financial advisor
+- **Model Context Protocol (MCP)** - `web_search` tool server
 - **Bootstrap 5** - UI styling
 
 ## 📝 Development Notes

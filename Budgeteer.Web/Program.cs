@@ -51,6 +51,12 @@ builder.Services.AddScoped<Budgeteer.Web.Services.LedgerService>();
 builder.Services.AddScoped<Budgeteer.Web.Services.TransactionQueryService>();
 builder.Services.AddHostedService<Budgeteer.Web.Services.CategorizationSeeder>();
 
+// AI personal financial advisor (Microsoft Agent Framework + Claude).
+// The MCP search client is a singleton so one search-server subprocess is shared across circuits.
+builder.Services.AddSingleton<Budgeteer.Web.Services.Advisor.SearchMcpClient>();
+builder.Services.AddScoped<Budgeteer.Web.Services.Advisor.FinancialAdvisorTools>();
+builder.Services.AddScoped<Budgeteer.Web.Services.Advisor.FinancialAdvisorAgent>();
+
 // CSV bank-statement import (stateless, so a singleton is fine)
 builder.Services.AddSingleton<BankStatementImporter>();
 builder.Services.AddScoped<Budgeteer.Web.Services.BankImportService>();
