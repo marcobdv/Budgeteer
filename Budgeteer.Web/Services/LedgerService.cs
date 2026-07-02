@@ -37,8 +37,9 @@ public sealed class LedgerService
         var view = await session.LoadAsync<TransactionView>(transactionId);
         if (view is null) return;
 
-        await RemoveTransactionsAsync(session, new[] { view });
-        await session.SaveChangesAsync();
+        var removed = await RemoveTransactionsAsync(session, new[] { view });
+        if (removed.Count > 0)
+            await session.SaveChangesAsync();
     }
 
     public async Task DeleteAccountAsync(string accountId)
@@ -80,10 +81,10 @@ public sealed class LedgerService
 
         var views = await session.Query<TransactionView>()
             .Where(v => batch.TransactionIds.Contains(v.Id)).ToListAsync();
-        await RemoveTransactionsAsync(session, views);
+        var removed = await RemoveTransactionsAsync(session, views);
         session.Delete<ImportBatch>(batchId);
         await session.SaveChangesAsync();
-        return views.Count;
+        return removed.Count;
     }
 
     /// <summary>
@@ -97,11 +98,19 @@ public sealed class LedgerService
         var view = await session.LoadAsync<TransactionView>(transactionId);
         if (view is null) return;
 
-        await RemoveTransactionsAsync(session, new[] { view });
+        // Fetch the stream with an expected version so a concurrent edit/delete of the same
+        // account fails on SaveChanges instead of double-applying.
+        var stream = await session.Events.FetchForWriting<Account>(view.AccountId);
+        var account = stream.Aggregate;
+        if (account is null || !account.TransactionIds.Contains(transactionId))
+            return; // deleted concurrently — nothing to replace
+
+        var deleteEvt = new TransactionDeleted(view.Id, view.AccountId, view.Amount, view.ImportKey, DateTime.UtcNow);
+        stream.AppendOne(deleteEvt);
+        account.Apply(deleteEvt); // frees the import key so the replacement below can carry it
+        await RemoveBudgetAndTransfersAsync(session, new List<string> { transactionId });
 
         var rules = await _categorizer.GetRulesAsync();
-        var account = await session.Events.AggregateStreamAsync<Account>(view.AccountId);
-        if (account is null) return;
 
         // Preserve the import dedup key and counterparty IBAN from the original transaction, so an
         // edit doesn't (a) free the key and let a re-import duplicate the row, or (b) drop the IBAN
@@ -109,7 +118,7 @@ public sealed class LedgerService
         var evt = account.RecordTransaction(
             description, amount, date, payee,
             importKey: view.ImportKey, counterpartyIban: Iban.From(view.CounterpartyIban));
-        session.Events.Append(view.AccountId, evt);
+        stream.AppendOne(evt);
         var category = TransactionCategorizer.Match(rules, payee, description, amount);
         _budgetHandler.Project(session, evt, category);
         await session.SaveChangesAsync();
@@ -119,14 +128,33 @@ public sealed class LedgerService
     }
 
     // Appends a TransactionDeleted to each transaction's account stream and removes derived docs.
-    private async Task RemoveTransactionsAsync(IDocumentSession session, IReadOnlyCollection<TransactionView> views)
+    // Streams are fetched for writing (expected version) and each transaction's presence is
+    // verified on the aggregate, so a concurrent delete of the same transaction can't reverse
+    // the balance twice. Returns the views that were actually removed.
+    private async Task<List<TransactionView>> RemoveTransactionsAsync(
+        IDocumentSession session, IReadOnlyCollection<TransactionView> views)
     {
-        foreach (var v in views)
+        var removed = new List<TransactionView>();
+        foreach (var group in views.GroupBy(v => v.AccountId))
         {
-            session.Events.Append(v.AccountId,
-                new TransactionDeleted(v.Id, v.AccountId, v.Amount, v.ImportKey, DateTime.UtcNow));
+            var stream = await session.Events.FetchForWriting<Account>(group.Key);
+            var account = stream.Aggregate;
+            if (account is null)
+                continue;
+
+            foreach (var v in group)
+            {
+                if (!account.TransactionIds.Contains(v.Id))
+                    continue; // already deleted by a concurrent writer
+
+                var evt = new TransactionDeleted(v.Id, v.AccountId, v.Amount, v.ImportKey, DateTime.UtcNow);
+                stream.AppendOne(evt);
+                account.Apply(evt);
+                removed.Add(v);
+            }
         }
-        await RemoveBudgetAndTransfersAsync(session, views.Select(v => v.Id).ToList());
+        await RemoveBudgetAndTransfersAsync(session, removed.Select(v => v.Id).ToList());
+        return removed;
     }
 
     // Archives the budget streams for the given transactions and deletes their read models + transfer links.

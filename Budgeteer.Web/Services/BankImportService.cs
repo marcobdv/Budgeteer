@@ -49,6 +49,13 @@ public sealed class BankImportService
             return existing.Id;
 
         await using var session = _store.LightweightSession();
+        // Re-check inside the write session to narrow the find-then-create window (two
+        // concurrent imports of the same new IBAN would otherwise both create an account).
+        var raced = (await session.Query<AccountSummary>().ToListAsync())
+            .FirstOrDefault(a => !target.IsEmpty && Iban.From(a.Iban) == target);
+        if (raced != null)
+            return raced.Id;
+
         var evt = Account.Create(name, accountType, initialBalance: 0m, iban: iban);
         session.Events.StartStream<Account>(evt.AccountId, evt);
         await session.SaveChangesAsync();
@@ -65,7 +72,11 @@ public sealed class BankImportService
         var rules = await _categorizer.GetRulesAsync();
 
         await using var session = _store.LightweightSession();
-        var account = await session.Events.AggregateStreamAsync<Account>(accountId)
+        // FetchForWriting stamps the stream's expected version, so a concurrent import of the
+        // same file (double-click, second browser tab) fails with a ConcurrencyException on
+        // SaveChanges instead of silently double-writing past the dedup check.
+        var stream = await session.Events.FetchForWriting<Account>(accountId);
+        var account = stream.Aggregate
             ?? throw new InvalidOperationException($"Account '{accountId}' was not found.");
 
         // A combined export (e.g. Rabobank's all-accounts download) carries rows for several
@@ -79,13 +90,9 @@ public sealed class BankImportService
                 "but the selected account has no IBAN to match rows against. " +
                 "Import into an account with a matching IBAN, one account at a time.");
 
-        var alreadyImported = account.ImportKeys;
         int skipped = 0;
         int skippedOtherAccount = 0;
         var importedIds = new List<string>();
-
-        // Guard against duplicates within the same file as well as across imports.
-        var seenInThisBatch = new HashSet<string>();
 
         foreach (var m in mutations)
         {
@@ -95,7 +102,9 @@ public sealed class BankImportService
                 continue;
             }
 
-            if (alreadyImported.Contains(m.DedupKey) || !seenInThisBatch.Add(m.DedupKey))
+            // Applying each event to the in-memory aggregate below keeps ImportKeys current,
+            // so this one check dedups both across imports and within the same file.
+            if (account.HasImported(m.DedupKey))
             {
                 skipped++;
                 continue;
@@ -111,7 +120,8 @@ public sealed class BankImportService
 
             // Append the account event AND the budget event in the same session so they commit
             // atomically — a failure can't leave a transaction without its expense/income.
-            session.Events.Append(accountId, evt);
+            stream.AppendOne(evt);
+            account.Apply(evt);
             var category = TransactionCategorizer.Match(rules, evt.Payee, evt.Description, evt.Amount);
             _budgetHandler.Project(session, evt, category);
             importedIds.Add(evt.TransactionId);

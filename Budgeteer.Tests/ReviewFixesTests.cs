@@ -106,4 +106,41 @@ public class ReviewFixesTests
 
         Assert.Equal("Manual Cat", TransactionCategorizer.Match(rules, "Corner Bakery", "", -8m));
     }
+
+    // A duplicate TransactionDeleted in a stream (raced in before the concurrency guard
+    // existed) must not reverse the balance twice when the aggregate is rebuilt.
+    [Fact]
+    public void Replaying_a_duplicate_delete_reverses_the_balance_only_once()
+    {
+        var account = new Budgeteer.Accounts.Domain.Account();
+        account.Apply(new Budgeteer.Shared.Events.Accounts.AccountCreated(
+            "a1", "Checking", "Checking", 100m, DateTime.UtcNow, null));
+
+        var recorded = new Budgeteer.Shared.Events.Accounts.TransactionRecorded(
+            "t1", "a1", new DateTime(2024, 1, 15), "Groceries", -25m, "AH", DateTime.UtcNow, "key-1", null);
+        account.Apply(recorded);
+        Assert.Equal(75m, account.Balance.Value);
+
+        var deleted = new Budgeteer.Shared.Events.Accounts.TransactionDeleted(
+            "t1", "a1", -25m, "key-1", DateTime.UtcNow);
+        account.Apply(deleted);
+        account.Apply(deleted); // duplicate — must be a no-op
+
+        Assert.Equal(100m, account.Balance.Value);
+        Assert.Empty(account.TransactionIds);
+    }
+
+    // The aggregate defends the import-dedup invariant itself rather than trusting callers.
+    [Fact]
+    public void Recording_an_already_imported_key_throws()
+    {
+        var account = new Budgeteer.Accounts.Domain.Account();
+        account.Apply(new Budgeteer.Shared.Events.Accounts.AccountCreated(
+            "a1", "Checking", "Checking", 0m, DateTime.UtcNow, null));
+        account.Apply(new Budgeteer.Shared.Events.Accounts.TransactionRecorded(
+            "t1", "a1", new DateTime(2024, 1, 15), "Groceries", -25m, "AH", DateTime.UtcNow, "key-1", null));
+
+        Assert.Throws<InvalidOperationException>(() =>
+            account.RecordTransaction("Groceries again", -25m, new DateTime(2024, 1, 15), importKey: "key-1"));
+    }
 }

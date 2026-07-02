@@ -45,11 +45,20 @@ public class TransactionEventHandler
     /// </summary>
     public async Task RecordAndProjectAsync(IDocumentSession session, string accountId, TransactionRecorded accountEvent)
     {
+        session.Events.Append(accountId, accountEvent);
+        await ProjectAsync(session, accountEvent);
+    }
+
+    /// <summary>
+    /// Resolves the category and appends only the derived Budget-domain event to the session,
+    /// WITHOUT saving. For callers that append the account event themselves — e.g. via a
+    /// FetchForWriting stream, so the account append carries an expected version.
+    /// </summary>
+    public async Task ProjectAsync(IDocumentSession session, TransactionRecorded accountEvent)
+    {
         var rules = await _categorizer.GetRulesAsync();
         var category = TransactionCategorizer.Match(
             rules, accountEvent.Payee, accountEvent.Description, accountEvent.Amount);
-
-        session.Events.Append(accountId, accountEvent);
         Project(session, accountEvent, category);
     }
 

@@ -266,7 +266,10 @@ else
         else
         {
             await using var session = AccountStore.LightweightSession();
-            var account = await session.Events.AggregateStreamAsync<Account>(newTransaction.AccountId);
+            // Fetch with an expected version so a concurrent write to the same account
+            // fails on SaveChanges instead of silently interleaving.
+            var stream = await session.Events.FetchForWriting<Account>(newTransaction.AccountId);
+            var account = stream.Aggregate;
             if (account == null) { busy = false; return; }
 
             var evt = account.RecordTransaction(
@@ -277,7 +280,8 @@ else
 
             // Append the account event and its budget projection in one transaction (categorized),
             // so the transaction can't land in the ledger without its matching expense/income view.
-            await TransactionHandler.RecordAndProjectAsync(session, newTransaction.AccountId, evt);
+            stream.AppendOne(evt);
+            await TransactionHandler.ProjectAsync(session, evt);
             await session.SaveChangesAsync();
 
             // A manually-added transaction may complete a transfer between own accounts.

@@ -46,8 +46,11 @@ public class Account
 
     public void Apply(TransactionDeleted evt)
     {
+        // Idempotent: a duplicate delete (e.g. raced in from two sessions before the
+        // concurrency guard existed) must not reverse the balance a second time.
+        if (!TransactionIds.Remove(evt.TransactionId))
+            return;
         Balance -= evt.Amount;
-        TransactionIds.Remove(evt.TransactionId);
         if (!string.IsNullOrEmpty(evt.ImportKey))
             ImportKeys.Remove(evt.ImportKey); // allow the row to be re-imported
     }
@@ -74,6 +77,11 @@ public class Account
         string? importKey = null,
         Iban counterpartyIban = default)
     {
+        // The aggregate defends its own dedup invariant rather than leaving it to callers.
+        if (!string.IsNullOrEmpty(importKey) && ImportKeys.Contains(importKey))
+            throw new InvalidOperationException(
+                $"A transaction with import key '{importKey}' was already recorded on account '{Id}'.");
+
         return new TransactionRecorded(
             TransactionId: Guid.NewGuid().ToString(),
             AccountId: Id,
