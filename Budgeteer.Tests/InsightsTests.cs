@@ -1,3 +1,4 @@
+using Budgeteer.Accounts;
 using Budgeteer.Accounts.Import;
 using Budgeteer.Budget.Insights;
 using Budgeteer.Budget.ReadModels;
@@ -8,8 +9,8 @@ namespace Budgeteer.Tests;
 
 public class StatementReconciliationTests
 {
-    private static BankMutation M(int day, decimal amount, decimal? balance) =>
-        new() { Date = new DateTime(2024, 1, day), Amount = amount, BalanceAfter = balance };
+    private static BankMutation M(int day, decimal amount, decimal? balance, string iban = "") =>
+        new() { Date = new DateTime(2024, 1, day), Amount = amount, BalanceAfter = balance, AccountIban = Iban.From(iban) };
 
     [Fact]
     public void Consistent_running_balances_report_no_gaps()
@@ -50,6 +51,44 @@ public class StatementReconciliationTests
         var result = StatementReconciliation.Check(new[] { M(1, -10m, null), M(2, -5m, null) });
         Assert.False(result.Checked);
         Assert.True(result.Consistent); // nothing to contradict
+    }
+
+    [Fact]
+    public void Multi_account_export_is_chained_per_account_without_false_gaps()
+    {
+        // A combined Rabobank export interleaves accounts; each account's own chain is
+        // consistent, but the naive whole-file chain would break at every boundary.
+        var result = StatementReconciliation.Check(new[]
+        {
+            M(1, -10m, 90m, "NL11RABO0000000001"),
+            M(1, 50m, 1050m, "NL22RABO0000000002"),
+            M(2, -5m, 85m, "NL11RABO0000000001"),
+            M(2, -50m, 1000m, "NL22RABO0000000002"),
+        });
+
+        Assert.True(result.Checked);
+        Assert.True(result.Consistent);
+        Assert.Empty(result.Gaps);
+    }
+
+    [Fact]
+    public void Gap_row_index_refers_to_the_original_file_row()
+    {
+        // Row 1 (index 1) has no balance and is skipped by the check; the break surfaces
+        // at file row index 3, not at the index within the filtered/grouped list.
+        var result = StatementReconciliation.Check(new[]
+        {
+            M(1, -10m, 90m),
+            M(2, -1m, null),
+            M(3, -5m, 85m),
+            M(4, 20m, 200m), // 85 + 20 = 105, statement says 200
+        });
+
+        Assert.False(result.Consistent);
+        var gap = Assert.Single(result.Gaps);
+        Assert.Equal(3, gap.RowIndex);
+        Assert.Equal(105m, gap.ExpectedBalance);
+        Assert.Equal(200m, gap.ActualBalance);
     }
 }
 

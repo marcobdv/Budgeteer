@@ -11,6 +11,14 @@ internal static class Samples
         "\"NL11RABO0123456789\",\"EUR\",\"RABONL2U\",\"000000000000000001\",\"2024-01-15\",\"2024-01-15\",\"-12,50\",\"987,50\",\"NL22INGB0009876543\",\"Albert Heijn 1234\",\"\",\"\",\"INGBNL2A\",\"ba\",\"\",\"2024011500001\",\"\",\"\",\"\",\"Boodschappen\",\"AH Filiaal 1234\",\"\",\"\",\"\",\"\",\"\"\n" +
         "\"NL11RABO0123456789\",\"EUR\",\"RABONL2U\",\"000000000000000002\",\"2024-01-16\",\"2024-01-16\",\"+1.500,00\",\"2.487,50\",\"NL33ABNA0001112223\",\"Werkgever BV\",\"\",\"\",\"ABNANL2A\",\"cb\",\"\",\"2024011600002\",\"\",\"\",\"\",\"Salaris januari 2024\",\"\",\"\",\"\",\"\",\"\",\"\"\n";
 
+    // A combined Rabobank download carrying rows for two accounts (checking + savings),
+    // as produced by the "all accounts" CSV export.
+    public const string RabobankMultiAccountCsv =
+        "\"IBAN/BBAN\",\"Munt\",\"BIC\",\"Volgnr\",\"Datum\",\"Rentedatum\",\"Bedrag\",\"Saldo na trn\",\"Tegenrekening IBAN/BBAN\",\"Naam tegenpartij\",\"Naam uiteindelijke partij\",\"Naam initiërende partij\",\"BIC tegenpartij\",\"Code\",\"Batch ID\",\"Transactiereferentie\",\"Machtigingskenmerk\",\"Incassant ID\",\"Betalingskenmerk\",\"Omschrijving-1\",\"Omschrijving-2\",\"Omschrijving-3\",\"Reden retour\",\"Oorspr bedrag\",\"Oorspr munt\",\"Koers\"\n" +
+        "\"NL11RABO0123456789\",\"EUR\",\"RABONL2U\",\"000000000000000001\",\"2024-01-15\",\"2024-01-15\",\"-12,50\",\"987,50\",\"NL22INGB0009876543\",\"Albert Heijn 1234\",\"\",\"\",\"INGBNL2A\",\"ba\",\"\",\"2024011500001\",\"\",\"\",\"\",\"Boodschappen\",\"\",\"\",\"\",\"\",\"\",\"\"\n" +
+        "\"NL44RABO0999999999\",\"EUR\",\"RABONL2U\",\"000000000000000009\",\"2024-01-15\",\"2024-01-15\",\"+250,00\",\"5.250,00\",\"NL11RABO0123456789\",\"Eigen rekening\",\"\",\"\",\"RABONL2U\",\"cb\",\"\",\"2024011500009\",\"\",\"\",\"\",\"Sparen\",\"\",\"\",\"\",\"\",\"\",\"\"\n" +
+        "\"NL11RABO0123456789\",\"EUR\",\"RABONL2U\",\"000000000000000002\",\"2024-01-16\",\"2024-01-16\",\"+1.500,00\",\"2.487,50\",\"NL33ABNA0001112223\",\"Werkgever BV\",\"\",\"\",\"ABNANL2A\",\"cb\",\"\",\"2024011600002\",\"\",\"\",\"\",\"Salaris januari 2024\",\"\",\"\",\"\",\"\",\"\",\"\"\n";
+
     // Mirrors sample-data/knab-example.csv (first two transactions)
     public const string KnabCsv =
         "\"Rekeningnummer\";\"Transactiedatum\";\"Valutacode\";\"CreditDebet\";\"Bedrag\";\"Tegenrekeningnummer\";\"Tegenrekeninghouder\";\"Valutadatum\";\"Betaalwijze\";\"Omschrijving\";\"Type betaling\";\"Machtigingsnummer\";\"Incassant ID\";\"Adres\"\n" +

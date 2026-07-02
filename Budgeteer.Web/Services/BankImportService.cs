@@ -68,8 +68,20 @@ public sealed class BankImportService
         var account = await session.Events.AggregateStreamAsync<Account>(accountId)
             ?? throw new InvalidOperationException($"Account '{accountId}' was not found.");
 
+        // A combined export (e.g. Rabobank's all-accounts download) carries rows for several
+        // IBANs; only the target account's rows may land on its stream, or another account's
+        // transactions silently corrupt its balance. Without an IBAN on the target account
+        // there is nothing to match rows on, so a multi-account file must be refused.
+        var fileIbans = mutations.Select(m => m.AccountIban).Where(i => !i.IsEmpty).Distinct().ToList();
+        if (account.Iban.IsEmpty && fileIbans.Count > 1)
+            throw new InvalidOperationException(
+                $"This file contains rows for {fileIbans.Count} accounts ({string.Join(", ", fileIbans)}), " +
+                "but the selected account has no IBAN to match rows against. " +
+                "Import into an account with a matching IBAN, one account at a time.");
+
         var alreadyImported = account.ImportKeys;
         int skipped = 0;
+        int skippedOtherAccount = 0;
         var importedIds = new List<string>();
 
         // Guard against duplicates within the same file as well as across imports.
@@ -77,6 +89,12 @@ public sealed class BankImportService
 
         foreach (var m in mutations)
         {
+            if (!m.AccountIban.IsEmpty && !account.Iban.IsEmpty && m.AccountIban != account.Iban)
+            {
+                skippedOtherAccount++;
+                continue;
+            }
+
             if (alreadyImported.Contains(m.DedupKey) || !seenInThisBatch.Add(m.DedupKey))
             {
                 skipped++;
@@ -117,9 +135,9 @@ public sealed class BankImportService
         if (imported > 0)
             await _transfers.DetectAsync();
 
-        return new ImportResult(Imported: imported, Skipped: skipped);
+        return new ImportResult(Imported: imported, Skipped: skipped, SkippedOtherAccount: skippedOtherAccount);
     }
 }
 
 /// <summary>Outcome of an import run.</summary>
-public record ImportResult(int Imported, int Skipped);
+public record ImportResult(int Imported, int Skipped, int SkippedOtherAccount = 0);

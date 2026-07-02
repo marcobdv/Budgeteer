@@ -80,4 +80,70 @@ public class BankImportIntegrationTests
         Assert.Equal(0, again.Imported);
         Assert.Equal(2, again.Skipped);
     }
+
+    [SkippableFact]
+    public async Task Multi_account_export_only_imports_rows_matching_the_target_accounts_iban()
+    {
+        Skip.IfNot(Pg(), "Local PostgreSQL not available.");
+
+        await using var store = CreateStore();
+        await store.Advanced.Clean.DeleteAllEventDataAsync();
+        await store.Advanced.Clean.DeleteAllDocumentsAsync();
+
+        var categorizer = new TransactionCategorizer(store);
+        var handler = new TransactionEventHandler(store, categorizer);
+        var transfers = new TransferDetectionService(store);
+        var importer = new BankImportService(store, handler, categorizer, transfers);
+
+        // Rabobank's combined download carries several accounts in one file.
+        var mutations = new BankStatementImporter().Parse(Encoding.UTF8.GetBytes(Samples.RabobankMultiAccountCsv));
+        Assert.Equal(3, mutations.Count);
+
+        var checkingId = await importer.FindOrCreateAccountByIbanAsync("NL11RABO0123456789", "Checking", "Checking");
+        var savingsId = await importer.FindOrCreateAccountByIbanAsync("NL44RABO0999999999", "Savings", "Savings");
+
+        // Importing the whole file into each account must only land that account's rows.
+        var checkingResult = await importer.ImportAsync(checkingId, mutations);
+        Assert.Equal(2, checkingResult.Imported);
+        Assert.Equal(1, checkingResult.SkippedOtherAccount);
+
+        var savingsResult = await importer.ImportAsync(savingsId, mutations);
+        Assert.Equal(1, savingsResult.Imported);
+        Assert.Equal(2, savingsResult.SkippedOtherAccount);
+
+        await using var q = store.QuerySession();
+        var checking = await q.Query<AccountSummary>().Where(a => a.Id == checkingId).SingleAsync();
+        Assert.Equal(2, checking.TransactionCount);
+        Assert.Equal(1487.50m, checking.Balance); // -12,50 + 1500,00
+        var savings = await q.Query<AccountSummary>().Where(a => a.Id == savingsId).SingleAsync();
+        Assert.Equal(1, savings.TransactionCount);
+        Assert.Equal(250.00m, savings.Balance);
+    }
+
+    [SkippableFact]
+    public async Task Multi_account_export_into_an_ibanless_account_is_refused()
+    {
+        Skip.IfNot(Pg(), "Local PostgreSQL not available.");
+
+        await using var store = CreateStore();
+        await store.Advanced.Clean.DeleteAllEventDataAsync();
+        await store.Advanced.Clean.DeleteAllDocumentsAsync();
+
+        var categorizer = new TransactionCategorizer(store);
+        var handler = new TransactionEventHandler(store, categorizer);
+        var transfers = new TransferDetectionService(store);
+        var importer = new BankImportService(store, handler, categorizer, transfers);
+
+        string accountId;
+        await using (var session = store.LightweightSession())
+        {
+            var evt = Budgeteer.Accounts.Domain.Account.Create("Manual", "Checking", 0m);
+            session.Events.StartStream<Budgeteer.Accounts.Domain.Account>(evt.AccountId, evt);
+            await session.SaveChangesAsync();
+            accountId = evt.AccountId;
+        }
+
+        var mutations = new BankStatementImporter().Parse(Encoding.UTF8.GetBytes(Samples.RabobankMultiAccountCsv));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => importer.ImportAsync(accountId, mutations));
+    }
 }

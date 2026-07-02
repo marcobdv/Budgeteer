@@ -1,6 +1,7 @@
 namespace Budgeteer.Accounts.Import;
 
-/// <summary>A break in the running-balance chain, i.e. a likely missing or duplicated transaction.</summary>
+/// <summary>A break in the running-balance chain, i.e. a likely missing or duplicated transaction.
+/// <see cref="RowIndex"/> is the 0-based index of the mutation in the parsed file.</summary>
 public record ReconciliationGap(int RowIndex, decimal ExpectedBalance, decimal ActualBalance)
 {
     public decimal Difference => ActualBalance - ExpectedBalance;
@@ -21,40 +22,64 @@ public static class StatementReconciliation
 {
     public static ReconciliationResult Check(IReadOnlyList<BankMutation> mutations)
     {
-        // Only meaningful if the export carries running balances on at least two rows.
-        var withBalance = mutations.Where(m => m.BalanceAfter is not null).ToList();
-        if (withBalance.Count < 2)
+        // Running balances are per account: a combined multi-account export (e.g. Rabobank's
+        // all-accounts download) restarts the chain at every account boundary, so each account's
+        // rows must be chained separately or every boundary would show up as a false gap.
+        // Original file indices are kept so reported row numbers refer to the actual file rows.
+        var indexed = mutations
+            .Select((m, i) => (Mutation: m, Index: i))
+            .Where(x => x.Mutation.BalanceAfter is not null)
+            .ToList();
+
+        bool anyChecked = false;
+        var gaps = new List<ReconciliationGap>();
+
+        foreach (var group in indexed.GroupBy(x => x.Mutation.AccountIban))
+        {
+            // Only meaningful when the account has running balances on at least two rows.
+            var rows = group.ToList();
+            if (rows.Count < 2)
+                continue;
+            anyChecked = true;
+
+            // The export lists rows in a consistent posting order, but it may be oldest-first or
+            // newest-first. We can't recover the true order by sorting on the (date-only) booking
+            // date, since same-day rows would be reordered arbitrarily and break the chain. Instead
+            // we trust the file's own order and check the running-balance chain both as-is and
+            // reversed, treating the account as consistent if either orientation holds.
+            var forward = ChainGaps(rows);
+            if (forward.Count == 0)
+                continue;
+
+            var backward = ChainGaps(Enumerable.Reverse(rows).ToList());
+            if (backward.Count == 0)
+                continue;
+
+            // Neither orientation is fully consistent — surface the smaller set of breaks.
+            gaps.AddRange(backward.Count < forward.Count ? backward : forward);
+        }
+
+        if (!anyChecked)
             return ReconciliationResult.NotAvailable;
 
-        // The export lists rows in a consistent posting order, but it may be oldest-first or
-        // newest-first. We can't recover the true order by sorting on the (date-only) booking date,
-        // since same-day rows would be reordered arbitrarily and break the chain. Instead we trust
-        // the file's own order and check the running-balance chain both as-is and reversed, treating
-        // the statement as consistent if either orientation holds.
-        var forward = ChainGaps(withBalance);
-        if (forward.Count == 0)
-            return new ReconciliationResult(Checked: true, Consistent: true, Gaps: forward);
-
-        var backward = ChainGaps(Enumerable.Reverse(withBalance).ToList());
-        if (backward.Count == 0)
-            return new ReconciliationResult(Checked: true, Consistent: true, Gaps: backward);
-
-        // Neither orientation is fully consistent — surface the smaller set of breaks.
-        var gaps = backward.Count < forward.Count ? backward : forward;
-        return new ReconciliationResult(Checked: true, Consistent: false, Gaps: gaps);
+        return new ReconciliationResult(
+            Checked: true,
+            Consistent: gaps.Count == 0,
+            Gaps: gaps.OrderBy(g => g.RowIndex).ToList());
     }
 
-    // Verifies prev.BalanceAfter + curr.Amount == curr.BalanceAfter down the list, in the given order.
-    private static List<ReconciliationGap> ChainGaps(IReadOnlyList<BankMutation> ordered)
+    // Verifies prev.BalanceAfter + curr.Amount == curr.BalanceAfter down the list, in the given
+    // order. Gaps carry the original file index of the row where the chain broke.
+    private static List<ReconciliationGap> ChainGaps(IReadOnlyList<(BankMutation Mutation, int Index)> ordered)
     {
         var gaps = new List<ReconciliationGap>();
         for (int i = 1; i < ordered.Count; i++)
         {
-            var prev = ordered[i - 1].BalanceAfter!.Value;
-            var expected = prev + ordered[i].Amount.Value;
-            var actual = ordered[i].BalanceAfter!.Value;
+            var prev = ordered[i - 1].Mutation.BalanceAfter!.Value;
+            var expected = prev + ordered[i].Mutation.Amount.Value;
+            var actual = ordered[i].Mutation.BalanceAfter!.Value;
             if (expected != actual)
-                gaps.Add(new ReconciliationGap(i, expected, actual));
+                gaps.Add(new ReconciliationGap(ordered[i].Index, expected, actual));
         }
         return gaps;
     }

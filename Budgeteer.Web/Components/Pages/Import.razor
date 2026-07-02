@@ -77,6 +77,15 @@
                 — @mutations.Count mutation(s)
             </h5>
 
+            @if (fileIbans.Count > 1)
+            {
+                <div class="alert alert-warning py-2">
+                    ⚠️ This file contains mutations for <strong>@fileIbans.Count</strong> different accounts
+                    (@string.Join(", ", fileIbans)). Only rows matching the selected account's IBAN will be
+                    imported — import the file once per account.
+                </div>
+            }
+
             @if (reconciliation.Checked)
             {
                 @if (reconciliation.Consistent)
@@ -125,7 +134,8 @@
             {
                 <div class="alert alert-success">
                     Imported <strong>@lastResult.Imported</strong> new mutation(s),
-                    skipped <strong>@lastResult.Skipped</strong> duplicate(s).
+                    skipped <strong>@lastResult.Skipped</strong> duplicate(s)@(lastResult.SkippedOtherAccount > 0
+                        ? $" and {lastResult.SkippedOtherAccount} row(s) belonging to other accounts" : "").
                 </div>
             }
 
@@ -174,6 +184,7 @@
     private bool busy;
     private ImportResult? lastResult;
     private ReconciliationResult reconciliation = ReconciliationResult.NotAvailable;
+    private List<Iban> fileIbans = new();
     private ImportBatch? lastImport;
     private bool undoConfirm;
     private string? undoMessage;
@@ -238,6 +249,7 @@
             }
 
             reconciliation = StatementReconciliation.Check(mutations);
+            fileIbans = mutations.Select(m => m.AccountIban).Where(i => !i.IsEmpty).Distinct().ToList();
 
             detectedFormat = selectedFormat == BankFormat.Unknown
                 ? Importer.DetectFormat(System.Text.Encoding.UTF8.GetString(fileBytes).Split('\n').FirstOrDefault(l => !string.IsNullOrWhiteSpace(l)) ?? "")
