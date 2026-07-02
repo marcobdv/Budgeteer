@@ -112,7 +112,8 @@ public class RecurringDetectionTests
         Assert.Equal("Monthly", sub.Cadence);
         Assert.Equal(4, sub.Occurrences);
         Assert.True(sub.AmountChanged);
-        Assert.Equal(new DateTime(2024, 4, 15).AddDays(sub.IntervalDays), sub.NextExpected);
+        // Calendar-anchored: charged on the 15th -> next expected on the 15th.
+        Assert.Equal(new DateTime(2024, 5, 15), sub.NextExpected);
     }
 
     [Fact]
@@ -136,6 +137,76 @@ public class RecurringDetectionTests
             E("Random Shop", 2024, 3, 20, 20m),
         });
         Assert.Empty(detected);
+    }
+
+    [Fact]
+    public void Two_random_gaps_cannot_synthesize_a_cadence()
+    {
+        // Gaps of 75 and 100 days: neither is quarterly, but their median (87) is within the
+        // quarterly tolerance. The old "allow one irregular gap" rule accepted this.
+        var detected = RecurringDetectionService.Detect(new[]
+        {
+            E("Random Shop", 2024, 1, 1, 20m),
+            E("Random Shop", 2024, 3, 16, 20m), // +75 days
+            E("Random Shop", 2024, 6, 24, 20m), // +100 days
+        });
+        Assert.Empty(detected);
+    }
+
+    [Fact]
+    public void Weekly_grocery_runs_with_varying_amounts_are_not_recurring()
+    {
+        var detected = RecurringDetectionService.Detect(new[]
+        {
+            E("Albert Heijn", 2024, 1, 6, 47.13m),
+            E("Albert Heijn", 2024, 1, 13, 82.50m),
+            E("Albert Heijn", 2024, 1, 20, 31.05m),
+            E("Albert Heijn", 2024, 1, 27, 64.20m),
+        });
+        Assert.Empty(detected);
+    }
+
+    [Fact]
+    public void Weekly_fixed_charge_is_recurring()
+    {
+        var detected = RecurringDetectionService.Detect(new[]
+        {
+            E("Storage Box BV", 2024, 1, 6, 12.50m),
+            E("Storage Box BV", 2024, 1, 13, 12.50m),
+            E("Storage Box BV", 2024, 1, 20, 12.50m),
+        });
+        var sub = Assert.Single(detected);
+        Assert.Equal("Weekly", sub.Cadence);
+    }
+
+    [Fact]
+    public void Biweekly_charges_are_detected()
+    {
+        var detected = RecurringDetectionService.Detect(new[]
+        {
+            E("Schoonmaak Service", 2024, 1, 5, 45m),
+            E("Schoonmaak Service", 2024, 1, 19, 45m),
+            E("Schoonmaak Service", 2024, 2, 2, 45m),
+        });
+        var sub = Assert.Single(detected);
+        Assert.Equal("Biweekly", sub.Cadence);
+    }
+
+    [Fact]
+    public void Excluded_transaction_ids_are_ignored()
+    {
+        // A monthly transfer to your own savings looks exactly like a subscription; the
+        // caller passes the transfer-leg ids so it is not reported as one.
+        static ExpenseView T(string id, int month) => new()
+        {
+            TransactionId = id, Payee = "Eigen Spaarrekening",
+            Date = new DateTime(2024, month, 1), Amount = 500m
+        };
+        var transfers = new[] { T("tr1", 1), T("tr2", 2), T("tr3", 3) };
+
+        Assert.NotEmpty(RecurringDetectionService.Detect(transfers));
+        Assert.Empty(RecurringDetectionService.Detect(transfers,
+            excludeTransactionIds: new[] { "tr1", "tr2", "tr3" }));
     }
 }
 

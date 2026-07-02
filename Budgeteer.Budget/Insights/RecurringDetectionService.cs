@@ -27,17 +27,26 @@ public static class RecurringDetectionService
     private static readonly (string Label, int Days, int Tol)[] Cadences =
     {
         ("Weekly", 7, 2),
+        ("Biweekly", 14, 2),
         ("Monthly", 30, 5),
         ("Quarterly", 91, 12),
         ("Yearly", 365, 25),
     };
 
-    public static IReadOnlyList<RecurringPayment> Detect(IEnumerable<ExpenseView> expenses)
+    /// <param name="expenses">Candidate expenses, grouped by payee.</param>
+    /// <param name="excludeTransactionIds">
+    /// Transactions to leave out — pass the transfer-leg ids, or a monthly transfer to your own
+    /// savings account (stable payee, amount and cadence) is reported as a "subscription".
+    /// </param>
+    public static IReadOnlyList<RecurringPayment> Detect(
+        IEnumerable<ExpenseView> expenses,
+        IReadOnlyCollection<string>? excludeTransactionIds = null)
     {
         var results = new List<RecurringPayment>();
 
         var groups = expenses
             .Where(e => !string.IsNullOrWhiteSpace(e.Payee))
+            .Where(e => excludeTransactionIds is null || !excludeTransactionIds.Contains(e.TransactionId))
             .GroupBy(e => e.Payee!.Trim(), StringComparer.OrdinalIgnoreCase);
 
         foreach (var g in groups)
@@ -55,13 +64,27 @@ public static class RecurringDetectionService
             if (cadence.Label is null)
                 continue; // no regular cadence
 
-            // Require the intervals to be reasonably consistent (most within tolerance of the cadence).
+            // Require the intervals to be reasonably consistent: most within tolerance of the
+            // cadence, and at least two in-tolerance regardless. With only two intervals the
+            // old "allow one irregular gap" rule needed just ONE match, so almost any pair of
+            // gaps whose average landed near a cadence counted as recurring.
             var regular = intervals.Count(d => Math.Abs(d - cadence.Days) <= cadence.Tol);
-            if (regular < intervals.Count - 1) // allow one irregular gap
+            if (regular < Math.Max(2, intervals.Count - 1))
                 continue;
 
             var amounts = items.Select(e => Math.Abs(e.Amount)).ToList();
             var typical = Median(amounts);
+
+            // A weekly/biweekly window also matches habitual shopping (any 5–9 day gap at the
+            // same supermarket). Short cadences must have stable amounts to count as recurring;
+            // monthly and longer are meaningful from payee + interval alone.
+            if (cadence.Days <= 14)
+            {
+                var stable = amounts.Count(a => typical > 0 && Math.Abs(a - typical) / typical <= 0.10m);
+                if (stable * 2 <= amounts.Count)
+                    continue;
+            }
+
             var last = items[^1];
             var lastAmount = Math.Abs(last.Amount);
 
@@ -72,7 +95,15 @@ public static class RecurringDetectionService
                 TypicalAmount: typical,
                 LastAmount: lastAmount,
                 LastDate: last.Date,
-                NextExpected: last.Date.AddDays(medianInterval),
+                // Calendar-anchored for month-based cadences: a subscription charged on the
+                // 15th is next expected on the 15th, not 30/91/365 days later.
+                NextExpected: cadence.Label switch
+                {
+                    "Monthly" => last.Date.AddMonths(1),
+                    "Quarterly" => last.Date.AddMonths(3),
+                    "Yearly" => last.Date.AddYears(1),
+                    _ => last.Date.AddDays(medianInterval),
+                },
                 Occurrences: items.Count,
                 AmountChanged: typical > 0 && Math.Abs(lastAmount - typical) / typical > 0.05m));
         }

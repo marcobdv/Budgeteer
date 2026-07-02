@@ -4,6 +4,7 @@
 @using Budgeteer.Web.Services
 @inject TransactionQueryService Transactions
 @inject BudgetService BudgetService
+@inject TransferDetectionService Transfers
 
 <PageTitle>Reports</PageTitle>
 
@@ -157,7 +158,10 @@ else
             .ToList();
 
         var expenses = await BudgetService.LoadExpensesAsync();
-        recurring = RecurringDetectionService.Detect(expenses);
+        // Exclude transfer legs, or the monthly transfer to your own savings account shows
+        // up as the biggest "subscription" on the page.
+        var transferIds = await Transfers.GetTransferTransactionIdsAsync();
+        recurring = RecurringDetectionService.Detect(expenses, transferIds);
         // Normalize each cadence to a monthly figure (30/interval days * amount).
         monthlyRecurring = recurring.Sum(r => r.IntervalDays > 0 ? r.TypicalAmount * 30m / r.IntervalDays : 0m);
 

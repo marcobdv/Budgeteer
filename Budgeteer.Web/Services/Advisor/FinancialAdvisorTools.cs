@@ -22,19 +22,22 @@ public sealed class FinancialAdvisorTools
     private readonly BudgetService _budget;
     private readonly BudgetAllocationService _allocations;
     private readonly SavingGoalService _goals;
+    private readonly TransferDetectionService _transfers;
 
     public FinancialAdvisorTools(
         IDocumentStore store,
         TransactionQueryService transactions,
         BudgetService budget,
         BudgetAllocationService allocations,
-        SavingGoalService goals)
+        SavingGoalService goals,
+        TransferDetectionService transfers)
     {
         _store = store;
         _transactions = transactions;
         _budget = budget;
         _allocations = allocations;
         _goals = goals;
+        _transfers = transfers;
     }
 
     private static string Money(decimal amount) => "€" + amount.ToString("N2", Inv);
@@ -147,13 +150,16 @@ public sealed class FinancialAdvisorTools
     public async Task<string> GetRecurringPayments()
     {
         var expenses = await _budget.LoadExpensesAsync();
-        var recurring = RecurringDetectionService.Detect(expenses);
+        // Exclude transfer legs so a monthly savings transfer isn't reported as a subscription.
+        var transferIds = await _transfers.GetTransferTransactionIdsAsync();
+        var recurring = RecurringDetectionService.Detect(expenses, transferIds);
         if (recurring.Count == 0)
             return "No recurring payments or subscriptions were detected.";
 
         var monthlyEquivalent = recurring.Sum(r => r.Cadence switch
         {
             "Weekly" => r.TypicalAmount * 52m / 12m,
+            "Biweekly" => r.TypicalAmount * 26m / 12m,
             "Monthly" => r.TypicalAmount,
             "Quarterly" => r.TypicalAmount / 3m,
             "Yearly" => r.TypicalAmount / 12m,
