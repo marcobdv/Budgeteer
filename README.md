@@ -74,6 +74,18 @@ sequenceDiagram
     Note over Store: inline projections refresh the read models
 ```
 
+## 🔒 Security Model — Local, Single-User Only
+
+**Budgeteer has no authentication.** It is designed to run on your own machine for a single
+user. Every page — and the `/export/transactions.csv` endpoint, which returns your entire
+financial history — is reachable by anyone who can reach the web server.
+
+- Run it on `localhost` only (the default launch profiles do). `AllowedHosts` is restricted
+  to localhost as an extra guard, but that is host-header filtering, not authentication.
+- **Do not** bind it to a LAN/public interface, port-forward it, or deploy it anywhere shared
+  without first adding ASP.NET Core authentication and `RequireAuthorization()` on the
+  Razor components and the export endpoint.
+
 ## 🚀 Getting Started
 
 ### Prerequisites
