@@ -39,7 +39,7 @@ public sealed class BankStatementImporter
     /// Parses the CSV. When <paramref name="format"/> is <see cref="BankFormat.Unknown"/>,
     /// the format is auto-detected from the header line.
     /// </summary>
-    public IReadOnlyList<BankMutation> Parse(byte[] content, BankFormat format = BankFormat.Unknown)
+    public BankParseResult Parse(byte[] content, BankFormat format = BankFormat.Unknown)
     {
         if (format == BankFormat.Unknown)
             format = DetectFormat(ReadFirstLine(content));

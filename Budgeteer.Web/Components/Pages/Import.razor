@@ -77,6 +77,17 @@
                 — @mutations.Count mutation(s)
             </h5>
 
+            @if (skippedRows > 0)
+            {
+                <div class="alert alert-warning py-2">
+                    ⚠️ <strong>@skippedRows</strong> row(s) could not be parsed and will not be imported.
+                    @if (skipSamples.Count > 0)
+                    {
+                        <br /><small class="text-muted">@string.Join(" · ", skipSamples)</small>
+                    }
+                </div>
+            }
+
             @if (fileIbans.Count > 1)
             {
                 <div class="alert alert-warning py-2">
@@ -185,6 +196,8 @@
     private ImportResult? lastResult;
     private ReconciliationResult reconciliation = ReconciliationResult.NotAvailable;
     private List<Iban> fileIbans = new();
+    private int skippedRows;
+    private IReadOnlyList<string> skipSamples = Array.Empty<string>();
     private ImportBatch? lastImport;
     private bool undoConfirm;
     private string? undoMessage;
@@ -241,10 +254,15 @@
                 return;
             }
 
-            mutations = Importer.Parse(fileBytes, selectedFormat);
+            var parsed = Importer.Parse(fileBytes, selectedFormat);
+            mutations = parsed;
+            skippedRows = parsed.SkippedRows;
+            skipSamples = parsed.SkipSamples;
             if (mutations.Count == 0)
             {
-                error = "No mutations were found in this file. Is it the right export?";
+                error = skippedRows > 0
+                    ? $"No mutations could be parsed from this file ({skippedRows} row(s) skipped). Is it the right export?"
+                    : "No mutations were found in this file. Is it the right export?";
                 return;
             }
 

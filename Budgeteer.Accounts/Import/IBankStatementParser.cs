@@ -24,6 +24,6 @@ public interface IBankStatementParser
     /// </summary>
     bool CanParse(string headerLine);
 
-    /// <summary>Parses the full CSV content into normalized mutations.</summary>
-    IReadOnlyList<BankMutation> Parse(Stream csv);
+    /// <summary>Parses the full CSV content into normalized mutations plus skip diagnostics.</summary>
+    BankParseResult Parse(Stream csv);
 }

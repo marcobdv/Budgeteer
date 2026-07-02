@@ -47,7 +47,12 @@ internal static class CsvParsingHelpers
             // Only comma present -> treat as decimal separator
             s = s.Replace(',', '.');
         }
-        // else: only dot or no separator -> already invariant-friendly
+        else if (lastDot >= 0 && System.Text.RegularExpressions.Regex.IsMatch(s, @"^[+-]?[1-9]\d{0,2}(\.\d{3})+$"))
+        {
+            // Only dots, in groups of exactly three: the Dutch thousands form ("1.500" = 1500).
+            // A genuine decimal separator in a bank export always carries two digits ("1.50").
+            s = s.Replace(".", "");
+        }
 
         return decimal.Parse(s, NumberStyles.Number | NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture);
     }
@@ -92,7 +97,33 @@ internal static class CsvParsingHelpers
     /// </summary>
     public static List<Dictionary<string, string>> ReadRows(Stream csv, string delimiter)
     {
-        using var reader = new StreamReader(csv, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+        // Older Dutch bank exports ship as ANSI (Windows-1252) without a BOM. Decoding those
+        // with a lenient UTF-8 reader silently turns "Café" into "Caf�", so try strict UTF-8
+        // first and fall back to Windows-1252 when the bytes aren't valid UTF-8.
+        var strictUtf8 = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
+        try
+        {
+            return ReadRowsWithEncoding(csv, delimiter, strictUtf8);
+        }
+        catch (DecoderFallbackException) when (csv.CanSeek)
+        {
+            csv.Position = 0;
+            return ReadRowsWithEncoding(csv, delimiter, Windows1252);
+        }
+    }
+
+    private static Encoding Windows1252
+    {
+        get
+        {
+            Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+            return Encoding.GetEncoding(1252);
+        }
+    }
+
+    private static List<Dictionary<string, string>> ReadRowsWithEncoding(Stream csv, string delimiter, Encoding encoding)
+    {
+        using var reader = new StreamReader(csv, encoding, detectEncodingFromByteOrderMarks: true, leaveOpen: true);
         var config = new CsvConfiguration(CultureInfo.InvariantCulture)
         {
             Delimiter = delimiter,

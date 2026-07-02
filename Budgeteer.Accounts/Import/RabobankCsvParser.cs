@@ -25,17 +25,27 @@ public sealed class RabobankCsvParser : IBankStatementParser
             || (h.Contains("naam tegenpartij") && h.Contains("saldo na trn"));
     }
 
-    public IReadOnlyList<BankMutation> Parse(Stream csv)
+    public BankParseResult Parse(Stream csv)
     {
         var rows = CsvParsingHelpers.ReadRows(csv, delimiter: ",");
         var mutations = new List<BankMutation>(rows.Count);
+        int skipped = 0;
+        var skipSamples = new List<string>();
+        // Older Rabobank export variants lack the "Volgnr" sequence column; without it, two
+        // genuinely identical same-day rows would collapse to one dedup key. Disambiguate by
+        // occurrence within the file, the same way the KNAB parser does.
+        var dedupSeen = new Dictionary<string, int>();
 
-        foreach (var row in rows)
+        for (int rowIndex = 0; rowIndex < rows.Count; rowIndex++)
         {
+            var row = rows[rowIndex];
             var dateRaw = row.Field("Datum", "Rentedatum");
             var amountRaw = row.Field("Bedrag");
             if (string.IsNullOrWhiteSpace(dateRaw) || string.IsNullOrWhiteSpace(amountRaw))
+            {
+                RecordSkip(ref skipped, skipSamples, rowIndex, "empty date or amount");
                 continue;
+            }
 
             try
             {
@@ -61,6 +71,16 @@ public sealed class RabobankCsvParser : IBankStatementParser
                 var volgnr = row.Field("Volgnr");
                 var date = CsvParsingHelpers.ParseDate(dateRaw);
 
+                var dedupKey = CsvParsingHelpers.MakeDedupKey(
+                    "rabobank", accountIban, dateRaw, amountRaw, volgnr, counterpartyIban, description);
+                if (string.IsNullOrEmpty(volgnr))
+                {
+                    var occurrence = dedupSeen.TryGetValue(dedupKey, out var seen) ? seen : 0;
+                    dedupSeen[dedupKey] = occurrence + 1;
+                    if (occurrence > 0)
+                        dedupKey = CsvParsingHelpers.MakeDedupKey(dedupKey, occurrence.ToString());
+                }
+
                 mutations.Add(new BankMutation
                 {
                     AccountIban = Iban.From(accountIban),
@@ -71,18 +91,24 @@ public sealed class RabobankCsvParser : IBankStatementParser
                     CounterpartyName = string.IsNullOrWhiteSpace(counterpartyName) ? null : counterpartyName,
                     CounterpartyIban = Iban.From(counterpartyIban),
                     BalanceAfter = CsvParsingHelpers.ParseOptionalAmount(row.Field("Saldo na trn", "Saldo")),
-                    DedupKey = CsvParsingHelpers.MakeDedupKey(
-                        "rabobank", accountIban, dateRaw, amountRaw, volgnr, counterpartyIban, description)
+                    DedupKey = dedupKey
                 });
             }
             catch (Exception ex) when (ex is FormatException or OverflowException)
             {
                 // Skip a single malformed row (bad number/date or an out-of-range amount)
-                // rather than aborting the whole import.
-                continue;
+                // rather than aborting the whole import — but count it, so the UI can warn.
+                RecordSkip(ref skipped, skipSamples, rowIndex, ex.Message);
             }
         }
 
-        return mutations;
+        return new BankParseResult(mutations, skipped, skipSamples);
+    }
+
+    private static void RecordSkip(ref int skipped, List<string> samples, int rowIndex, string reason)
+    {
+        skipped++;
+        if (samples.Count < 3)
+            samples.Add($"data row {rowIndex + 1}: {reason}");
     }
 }
