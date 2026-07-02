@@ -12,14 +12,14 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Marten" Version="8.17.0" />
-    <PackageReference Include="Marten.AspNetCore" Version="8.17.0" />
+    <PackageReference Include="Marten" Version="8.37.3" />
+    <PackageReference Include="Marten.AspNetCore" Version="8.37.3" />
     <PackageReference Include="Npgsql" Version="10.0.1" />
     <!-- Microsoft Agent Framework + its first-party Anthropic (Claude) provider. -->
-    <PackageReference Include="Microsoft.Agents.AI" Version="1.0.0-*" />
-    <PackageReference Include="Microsoft.Agents.AI.Anthropic" Version="1.0.0-*" />
+    <PackageReference Include="Microsoft.Agents.AI" Version="1.0.0" />
+    <PackageReference Include="Microsoft.Agents.AI.Anthropic" Version="1.0.0-rc6" />
     <!-- MCP client: connects the advisor agent to the Budgeteer.SearchMcp server. -->
-    <PackageReference Include="ModelContextProtocol" Version="0.*-*" />
+    <PackageReference Include="ModelContextProtocol" Version="0.9.0-preview.2" />
   </ItemGroup>
 
   <PropertyGroup>

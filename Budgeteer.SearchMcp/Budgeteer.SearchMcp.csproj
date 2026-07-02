@@ -9,7 +9,7 @@
 
   <ItemGroup>
     <!-- Model Context Protocol C# SDK (server, stdio transport). -->
-    <PackageReference Include="ModelContextProtocol" Version="0.*-*" />
+    <PackageReference Include="ModelContextProtocol" Version="0.9.0-preview.2" />
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="9.0.0" />
   </ItemGroup>
 
