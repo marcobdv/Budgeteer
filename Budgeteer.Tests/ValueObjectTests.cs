@@ -87,4 +87,37 @@ public class IbanTests
         Assert.Null(Iban.Empty.ToNullableString());
         Assert.Equal("NL11RABO0123456789", Iban.From("nl11 rabo 0123456789").ToNullableString());
     }
+
+    [Theory]
+    [InlineData("NL91ABNA0417164300")]      // valid Dutch IBAN (standard example)
+    [InlineData("nl91 abna 0417 1643 00")]  // spacing/case tolerant
+    [InlineData("DE89370400440532013000")]  // valid German IBAN
+    public void TryParse_accepts_checksum_valid_ibans(string raw)
+    {
+        Assert.True(Iban.TryParse(raw, out var iban));
+        Assert.False(iban.IsEmpty);
+    }
+
+    [Theory]
+    [InlineData("NL92ABNA0417164300")] // wrong check digits
+    [InlineData("HELLO")]              // not an IBAN at all
+    [InlineData("NL91ABNA041716")]     // too short
+    [InlineData("")]
+    [InlineData(null)]
+    public void TryParse_rejects_invalid_ibans(string? raw)
+    {
+        Assert.False(Iban.TryParse(raw, out var iban));
+        Assert.True(iban.IsEmpty);
+    }
+
+    [Fact]
+    public void Iban_round_trips_through_system_text_json()
+    {
+        // Marten 8 serializes documents with System.Text.Json; a struct that deserializes
+        // to Empty would silently wipe data if it's ever embedded in a document.
+        var original = Iban.From("NL91ABNA0417164300");
+        var json = System.Text.Json.JsonSerializer.Serialize(original);
+        var restored = System.Text.Json.JsonSerializer.Deserialize<Iban>(json);
+        Assert.Equal(original, restored);
+    }
 }

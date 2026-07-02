@@ -127,6 +127,15 @@ else
     {
         busy = true;
         error = null;
+        // A typo'd IBAN would silently never match imported mutations, so validate it here
+        // (checksum included); the CSV-matching paths keep using the tolerant Iban.From.
+        if (!string.IsNullOrWhiteSpace(newAccount.Iban) &&
+            !Budgeteer.Accounts.Iban.TryParse(newAccount.Iban, out _))
+        {
+            error = "That doesn't look like a valid IBAN — check for typos (e.g. NL91ABNA0417164300).";
+            busy = false;
+            return;
+        }
         try
         {
             await using var session = AccountStore.LightweightSession();
