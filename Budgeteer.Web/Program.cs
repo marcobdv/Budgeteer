@@ -81,7 +81,9 @@ app.MapGet("/export/transactions.csv", async (Budgeteer.Web.Services.Transaction
 {
     var rows = await query.LoadAllAsync();
     var csv = Budgeteer.Web.Services.TransactionCsvExporter.ToCsv(rows);
-    var bytes = System.Text.Encoding.UTF8.GetBytes(csv);
+    // BOM so Excel on Windows decodes diacritics in payee names as UTF-8.
+    var utf8Bom = new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: true);
+    var bytes = utf8Bom.GetPreamble().Concat(utf8Bom.GetBytes(csv)).ToArray();
     return Results.File(bytes, "text/csv", "budgeteer-transactions.csv");
 });
 

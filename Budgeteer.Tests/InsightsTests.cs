@@ -114,7 +114,7 @@ public class CsvExportTests
         };
 
         var csv = TransactionCsvExporter.ToCsv(rows);
-        var lines = csv.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        var lines = csv.Split("\r\n", StringSplitOptions.RemoveEmptyEntries);
 
         Assert.Equal("Date,Account,Description,Payee,Category,Amount,Type", lines[0]);
         // Fields with a comma or quote are quoted; embedded quotes are doubled.
@@ -122,5 +122,41 @@ public class CsvExportTests
         Assert.Contains("\"Albert \"\"AH\"\" Heijn\"", csv);
         Assert.Contains("-12.50,Expense", csv);
         Assert.Contains("2000.00,Income", csv);
+    }
+
+    [Fact]
+    public void Formula_prefixes_in_text_fields_are_neutralized()
+    {
+        // Description/payee text is chosen by the counterparty on a bank statement,
+        // so a formula must come out inert when the export is opened in a spreadsheet.
+        var rows = new[]
+        {
+            new TransactionRow("t1", "a", "Checking", new DateTime(2024, 1, 15),
+                "=HYPERLINK(\"http://evil\",\"open\")", "@payee", -1m, "+cat", false),
+        };
+
+        var csv = TransactionCsvExporter.ToCsv(rows);
+
+        Assert.Contains("\"'=HYPERLINK(\"\"http://evil\"\",\"\"open\"\")\"", csv);
+        Assert.Contains("'@payee", csv);
+        Assert.Contains("'+cat", csv);
+        // Numeric amounts must stay numeric — no apostrophe on the leading minus.
+        Assert.Contains(",-1.00,", csv);
+    }
+
+    [Fact]
+    public void Newlines_inside_fields_stay_quoted_and_rows_stay_intact()
+    {
+        var rows = new[]
+        {
+            new TransactionRow("t1", "a", "Checking", new DateTime(2024, 1, 15),
+                "line one\nline two", null, -1m, null, false),
+        };
+
+        var csv = TransactionCsvExporter.ToCsv(rows);
+
+        Assert.Contains("\"line one\nline two\"", csv);
+        // Header + one record: exactly two CRLF-terminated lines outside the quoted field.
+        Assert.Equal(2, csv.Split("\r\n", StringSplitOptions.RemoveEmptyEntries).Length);
     }
 }
