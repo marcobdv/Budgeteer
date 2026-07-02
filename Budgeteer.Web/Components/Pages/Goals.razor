@@ -108,7 +108,7 @@ else
                             <div class="input-group input-group-sm mt-2" style="max-width:260px">
                                 <span class="input-group-text">Saved €</span>
                                 <input type="number" min="0" step="50" class="form-control"
-                                       value="@p.Goal.ManualAmount"
+                                       value="@p.Goal.ManualAmount.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)"
                                        @onchange="@(args => UpdateManual(p.Goal, args.Value?.ToString()))" />
                             </div>
                         }

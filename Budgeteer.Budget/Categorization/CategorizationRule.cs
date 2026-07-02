@@ -12,6 +12,18 @@ public enum RuleSource
 }
 
 /// <summary>
+/// Marker document persisted once the default rules have been seeded, so seeding never
+/// repeats — a user who deletes every seed rule must not get them all back on next startup
+/// (which is what inferring "already seeded" from surviving seed rules did).
+/// </summary>
+public class CategorizationSeedMarker
+{
+    public const string DefaultId = "default";
+    public string Id { get; set; } = DefaultId;
+    public DateTime SeededAt { get; set; }
+}
+
+/// <summary>
 /// A rule that assigns a category to a transaction when <see cref="Keyword"/> occurs
 /// (case-insensitively) in the transaction's payee or description.
 /// Stored as a Marten document. Higher <see cref="Priority"/> wins; learned/manual rules

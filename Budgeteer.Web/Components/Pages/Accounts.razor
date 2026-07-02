@@ -27,9 +27,11 @@
         <div class="card-body">
             <h5 class="card-title">Create New Account</h5>
             <EditForm Model="newAccount" OnValidSubmit="CreateAccount">
+                <DataAnnotationsValidator />
                 <div class="mb-3">
                     <label class="form-label">Account Name</label>
                     <InputText class="form-control" @bind-Value="newAccount.Name" />
+                    <ValidationMessage For="@(() => newAccount.Name)" />
                 </div>
                 <div class="mb-3">
                     <label class="form-label">Account Type</label>
@@ -181,6 +183,7 @@ else
 
     private class NewAccountModel
     {
+        [System.ComponentModel.DataAnnotations.Required(ErrorMessage = "Give the account a name.")]
         public string Name { get; set; } = "";
         public string AccountType { get; set; } = "Checking";
         public string Iban { get; set; } = "";

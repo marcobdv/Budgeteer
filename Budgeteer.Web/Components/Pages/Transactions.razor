@@ -26,15 +26,19 @@
         <div class="card-body">
             <h5 class="card-title">@(editingId is null ? "Add Transaction" : "Edit Transaction")</h5>
             <EditForm Model="newTransaction" OnValidSubmit="AddTransaction">
+                <DataAnnotationsValidator />
                 <div class="mb-3">
                     <label class="form-label">Account</label>
-                    <InputSelect class="form-control" @bind-Value="newTransaction.AccountId">
+                    @* Moving a transaction to another account is not supported by the edit
+                       (replace) flow, so the selector is disabled to avoid a silent no-op. *@
+                    <InputSelect class="form-control" @bind-Value="newTransaction.AccountId" disabled="@(editingId is not null)">
                         <option value="">-- Select Account --</option>
                         @foreach (var account in accounts)
                         {
                             <option value="@account.Id">@account.Name</option>
                         }
                     </InputSelect>
+                    <ValidationMessage For="@(() => newTransaction.AccountId)" />
                 </div>
                 <div class="mb-3">
                     <label class="form-label">Date</label>
@@ -43,6 +47,7 @@
                 <div class="mb-3">
                     <label class="form-label">Description</label>
                     <InputText class="form-control" @bind-Value="newTransaction.Description" />
+                    <ValidationMessage For="@(() => newTransaction.Description)" />
                 </div>
                 <div class="mb-3">
                     <label class="form-label">Amount (negative for expense, positive for income)</label>
@@ -367,8 +372,10 @@ else
 
     private class NewTransactionModel
     {
+        [System.ComponentModel.DataAnnotations.Required(ErrorMessage = "Select an account.")]
         public string AccountId { get; set; } = "";
         public DateTime Date { get; set; }
+        [System.ComponentModel.DataAnnotations.Required(ErrorMessage = "Enter a description.")]
         public string Description { get; set; } = "";
         public decimal Amount { get; set; }
         public string? Payee { get; set; }

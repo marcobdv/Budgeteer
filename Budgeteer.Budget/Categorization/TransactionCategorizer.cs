@@ -135,11 +135,22 @@ public class TransactionCategorizer
     public async Task SeedDefaultsAsync()
     {
         await using var session = _store.LightweightSession();
+        var marker = await session.LoadAsync<CategorizationSeedMarker>(CategorizationSeedMarker.DefaultId);
+        if (marker is not null)
+            return;
+
+        // Back-compat: a store seeded before the marker existed keeps its rules (possibly
+        // already pruned by the user) and just gains the marker.
         var hasSeed = await session.Query<CategorizationRule>()
             .AnyAsync(r => r.Source == RuleSource.Seed);
         if (hasSeed)
+        {
+            session.Store(new CategorizationSeedMarker { SeededAt = DateTime.UtcNow });
+            await session.SaveChangesAsync();
             return;
+        }
 
+        session.Store(new CategorizationSeedMarker { SeededAt = DateTime.UtcNow });
         foreach (var (keyword, category) in DefaultRules.Entries)
         {
             session.Store(new CategorizationRule

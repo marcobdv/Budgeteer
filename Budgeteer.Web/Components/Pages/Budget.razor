@@ -111,8 +111,10 @@ else
                         </td>
                         <td class="text-end">€@r.Spent.ToString("N2")</td>
                         <td class="text-end" style="width:140px">
+                            @* Rendered invariantly: on an nl-NL server host, CurrentCulture would
+                               emit "50,5", which browsers reject for number inputs (blank field). *@
                             <input type="number" min="0" step="10" class="form-control form-control-sm text-end"
-                                   value="@(r.HasLimit ? r.MonthlyLimit : (decimal?)null)"
+                                   value="@(r.HasLimit ? r.MonthlyLimit.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) : "")"
                                    @onchange="@(args => SetLimit(r.Category, args.Value?.ToString()))" />
                         </td>
                         <td class="text-end @(r.OverBudget ? "text-danger fw-bold" : "")">
