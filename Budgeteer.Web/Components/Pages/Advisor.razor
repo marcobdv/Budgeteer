@@ -1,7 +1,9 @@
 @page "/advisor"
 @rendermode InteractiveServer
 @using Budgeteer.Web.Services.Advisor
+@implements IDisposable
 @inject FinancialAdvisorAgent AdvisorAgent
+@inject ILogger<Advisor> Logger
 
 <PageTitle>Financial Advisor</PageTitle>
 
@@ -64,6 +66,14 @@ else
         <div class="alert alert-danger py-2">@_error</div>
     }
 
+    @if (_messages.Count >= 30)
+    {
+        <div class="alert alert-light border py-2 small">
+            This conversation is getting long — every question re-sends the whole history to the
+            model. Consider starting a <strong>New chat</strong> if you're changing topic.
+        </div>
+    }
+
     <div class="input-group">
         <input class="form-control" placeholder="Ask your financial advisor…" @bind="_input"
                @bind:event="oninput" @onkeydown="OnKeyDown" disabled="@_busy" />
@@ -93,6 +103,11 @@ else
     private bool _busy;
     private string? _error;
     private ElementReference _scrollAnchor;
+    private CancellationTokenSource? _cts;
+
+    // A single answer can span many tool calls, but a run must not outlive a closed tab or
+    // hang forever — the agent keeps consuming API tokens with nobody to read the answer.
+    private static readonly TimeSpan RunTimeout = TimeSpan.FromMinutes(3);
 
     private async Task OnKeyDown(KeyboardEventArgs e)
     {
@@ -117,14 +132,22 @@ else
         _messages.Add(new ChatMessage(question, IsUser: true));
         _busy = true;
 
+        _cts?.Dispose();
+        _cts = new CancellationTokenSource(RunTimeout);
         try
         {
-            var answer = await AdvisorAgent.AskAsync(question);
+            var answer = await AdvisorAgent.AskAsync(question, _cts.Token);
             _messages.Add(new ChatMessage(answer, IsUser: false));
+        }
+        catch (OperationCanceledException)
+        {
+            _error = "The advisor took too long and the request was cancelled. Try a narrower question.";
         }
         catch (Exception ex)
         {
-            _error = $"The advisor could not answer: {ex.Message}";
+            // Exception details (request ids, endpoints) go to the log, not the browser.
+            Logger.LogError(ex, "Advisor run failed.");
+            _error = "The advisor could not answer. Check the server log for details, then try again.";
         }
         finally
         {
@@ -137,5 +160,14 @@ else
         _messages.Clear();
         _error = null;
         AdvisorAgent.ResetConversation();
+    }
+
+    // Cancel any in-flight agent run when the circuit goes away (tab closed, navigation),
+    // instead of letting the tool loop run to completion with nobody to receive the answer.
+    public void Dispose()
+    {
+        _cts?.Cancel();
+        _cts?.Dispose();
+        _cts = null;
     }
 }

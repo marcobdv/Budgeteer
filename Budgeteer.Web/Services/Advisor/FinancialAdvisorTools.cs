@@ -42,6 +42,16 @@ public sealed class FinancialAdvisorTools
 
     private static string Money(decimal amount) => "€" + amount.ToString("N2", Inv);
 
+    // Payee and description text comes from imported bank statements — i.e. from whoever sent or
+    // billed a payment — so it is attacker-influenced and can contain instruction-like text.
+    // Flatten line breaks (so it can't imitate extra tool-output lines) and quote it; the system
+    // prompt tells the model that quoted statement text is data, never instructions.
+    private static string Untrusted(string? s)
+    {
+        var flat = (s ?? string.Empty).Replace('\r', ' ').Replace('\n', ' ').Trim();
+        return "\"" + flat.Replace('"', '\'') + "\"";
+    }
+
     private async Task<List<AccountSummary>> LoadAccountsAsync()
     {
         await using var session = _store.QuerySession();
@@ -171,7 +181,7 @@ public sealed class FinancialAdvisorTools
         foreach (var r in recurring)
         {
             var changed = r.AmountChanged ? $" (last charge {Money(r.LastAmount)} differs from typical)" : "";
-            sb.AppendLine($"- {r.Payee}: {Money(r.TypicalAmount)} {r.Cadence.ToLowerInvariant()}, " +
+            sb.AppendLine($"- {Untrusted(r.Payee)}: {Money(r.TypicalAmount)} {r.Cadence.ToLowerInvariant()}, " +
                           $"next expected {r.NextExpected:yyyy-MM-dd}{changed}.");
         }
         sb.AppendLine($"Estimated total recurring cost: {Money(monthlyEquivalent)}/month.");
@@ -219,7 +229,7 @@ public sealed class FinancialAdvisorTools
             var who = string.IsNullOrWhiteSpace(r.Payee) ? r.Description : r.Payee;
             var cat = string.IsNullOrWhiteSpace(r.Category) ? "Uncategorized" : r.Category;
             var transfer = r.IsTransfer ? " [transfer]" : "";
-            sb.AppendLine($"- {r.Date:yyyy-MM-dd} {who} {Money(r.Amount)} [{cat}] ({r.AccountName}){transfer}");
+            sb.AppendLine($"- {r.Date:yyyy-MM-dd} {Untrusted(who)} {Money(r.Amount)} [{cat}] ({r.AccountName}){transfer}");
         }
         return sb.ToString();
     }
@@ -288,7 +298,7 @@ public sealed class FinancialAdvisorTools
         {
             var who = string.IsNullOrWhiteSpace(r.Payee) ? r.Description : r.Payee;
             var cat = string.IsNullOrWhiteSpace(r.Category) ? "Uncategorized" : r.Category;
-            sb.AppendLine($"- {r.Date:yyyy-MM-dd} {who} {Money(Math.Abs(r.Amount))} [{cat}]");
+            sb.AppendLine($"- {r.Date:yyyy-MM-dd} {Untrusted(who)} {Money(Math.Abs(r.Amount))} [{cat}]");
         }
         return sb.ToString();
     }
@@ -343,7 +353,7 @@ public sealed class FinancialAdvisorTools
         foreach (var r in rows)
         {
             var who = string.IsNullOrWhiteSpace(r.Payee) ? r.Description : r.Payee;
-            sb.AppendLine($"- {r.Date:yyyy-MM-dd} {who} {Money(Math.Abs(r.Amount))}");
+            sb.AppendLine($"- {r.Date:yyyy-MM-dd} {Untrusted(who)} {Money(Math.Abs(r.Amount))}");
         }
         if (filtered.Count > rows.Count)
             sb.AppendLine($"… and {filtered.Count - rows.Count} more.");
@@ -439,7 +449,7 @@ public sealed class FinancialAdvisorTools
         foreach (var r in rows.Take(count))
         {
             var who = string.IsNullOrWhiteSpace(r.Payee) ? r.Description : r.Payee;
-            sb.AppendLine($"- {r.Date:yyyy-MM-dd} {who} {Money(Math.Abs(r.Amount))} ({r.AccountName})");
+            sb.AppendLine($"- {r.Date:yyyy-MM-dd} {Untrusted(who)} {Money(Math.Abs(r.Amount))} ({r.AccountName})");
         }
         if (rows.Count > count)
             sb.AppendLine($"… and {rows.Count - count} more.");
