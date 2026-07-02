@@ -107,6 +107,32 @@ public class ReviewFixesTests
         Assert.Equal("Manual Cat", TransactionCategorizer.Match(rules, "Corner Bakery", "", -8m));
     }
 
+    // Seed keywords with a deliberate trailing space ("bp ", "ret ", "plus ") were being
+    // trimmed by Match, so they fired inside longer words ("ABP" -> Fuel, "internet" ->
+    // Transport). Matching now requires a word start and respects the trailing space.
+    [Fact]
+    public void Short_seed_keywords_only_match_whole_words()
+    {
+        var rules = DefaultRules.Entries.Select(e => new CategorizationRule
+        {
+            Keyword = e.Keyword, Category = e.Category, Source = RuleSource.Seed,
+            Priority = (int)CategorizationRule.PriorityTier.Seed
+        }).ToList();
+
+        // False positives that the trimmed match produced:
+        Assert.NotEqual("Fuel", TransactionCategorizer.Match(rules, "ABP Pensioen", "Premie", -120m));
+        Assert.NotEqual("Transport", TransactionCategorizer.Match(rules, null, "Internet abonnement", -30m));
+        Assert.NotEqual("Groceries", TransactionCategorizer.Match(rules, null, "Surplus terugbetaling", -5m));
+
+        // The keywords still hit their intended payees, including at the end of the text:
+        Assert.Equal("Fuel", TransactionCategorizer.Match(rules, "BP Station Utrecht", "Tanken", -60m));
+        Assert.Equal("Fuel", TransactionCategorizer.Match(rules, null, "Tanken bij BP", -60m));
+        Assert.Equal("Groceries", TransactionCategorizer.Match(rules, "PLUS Amsterdam", "", -25m));
+
+        // Substring semantics at the end of a keyword are preserved:
+        Assert.Equal("Dining", TransactionCategorizer.Match(rules, "McDonalds Leiden", "", -12m));
+    }
+
     // A duplicate TransactionDeleted in a stream (raced in before the concurrency guard
     // existed) must not reverse the balance twice when the aggregate is rebuilt.
     [Fact]

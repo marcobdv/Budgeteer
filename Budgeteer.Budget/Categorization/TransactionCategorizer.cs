@@ -35,21 +35,40 @@ public class TransactionCategorizer
     /// </summary>
     public static string? Match(IEnumerable<CategorizationRule> rules, string? payee, string? description, decimal amount)
     {
-        var text = ((payee ?? string.Empty) + " " + (description ?? string.Empty)).ToLowerInvariant();
+        // The trailing space lets keywords that end in a space ("bp ", "vve ") match at the
+        // end of the text too — end-of-text is a word boundary.
+        var text = ((payee ?? string.Empty) + " " + (description ?? string.Empty)).ToLowerInvariant() + " ";
 
         var best = rules
-            .Where(r => !string.IsNullOrWhiteSpace(r.Keyword) && text.Contains(r.Keyword.Trim().ToLowerInvariant()))
+            .Where(r => !string.IsNullOrWhiteSpace(r.Keyword) && KeywordMatches(text, r.Keyword))
             // For income, only apply income-category seed rules or explicit user (manual/learned)
             // rules; don't let an expense seed keyword categorize an incoming payment.
             .Where(r => amount <= 0 || r.Source != RuleSource.Seed || IncomeCategories.Contains(r.Category))
             .OrderByDescending(r => r.Priority)
-            .ThenByDescending(r => r.Keyword.Trim().Length)
+            .ThenByDescending(r => r.Keyword.Length)
             .FirstOrDefault();
 
         if (best != null)
             return best.Category;
 
         return amount > 0 ? DefaultIncomeCategory : null;
+    }
+
+    // A keyword only matches at the start of a word: "bp " must not match inside "abp" and
+    // "ret " must not match inside "internet". The end stays substring-based so "mcdonald"
+    // still matches "mcdonalds" — seeds that need an end boundary encode it with a trailing
+    // space, which is why the keyword must NOT be trimmed here.
+    private static bool KeywordMatches(string text, string keyword)
+    {
+        var kw = keyword.ToLowerInvariant();
+        int idx = 0;
+        while ((idx = text.IndexOf(kw, idx, StringComparison.Ordinal)) >= 0)
+        {
+            if (idx == 0 || !char.IsLetterOrDigit(text[idx - 1]))
+                return true;
+            idx++;
+        }
+        return false;
     }
 
     /// <summary>Categorizes a single transaction against the rules currently in the store.</summary>
