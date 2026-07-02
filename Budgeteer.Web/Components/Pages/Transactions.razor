@@ -1,5 +1,7 @@
 @page "/transactions"
-@rendermode InteractiveServer
+@* No prerender: it would run the full-table load twice per navigation and flash an
+   empty state before the interactive circuit takes over. *@
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
 @using Budgeteer.Accounts.Domain
 @using Budgeteer.Accounts.ReadModels
 @using Budgeteer.Shared.Events.Accounts
@@ -70,7 +72,7 @@
         <div class="row g-2 align-items-end">
             <div class="col-md-3">
                 <label class="form-label mb-0">Account</label>
-                <select class="form-select form-select-sm" @bind="filterAccountId">
+                <select class="form-select form-select-sm" @bind="filterAccountId" @bind:after="ApplyFilters">
                     <option value="">All accounts</option>
                     @foreach (var a in accounts)
                     {
@@ -80,7 +82,7 @@
             </div>
             <div class="col-md-2">
                 <label class="form-label mb-0">Category</label>
-                <select class="form-select form-select-sm" @bind="filterCategory">
+                <select class="form-select form-select-sm" @bind="filterCategory" @bind:after="ApplyFilters">
                     <option value="">All</option>
                     @foreach (var c in categories)
                     {
@@ -90,7 +92,7 @@
             </div>
             <div class="col-md-2">
                 <label class="form-label mb-0">Flow</label>
-                <select class="form-select form-select-sm" @bind="filterFlow">
+                <select class="form-select form-select-sm" @bind="filterFlow" @bind:after="ApplyFilters">
                     <option value="@FlowFilter.All">All</option>
                     <option value="@FlowFilter.IncomeOnly">Income</option>
                     <option value="@FlowFilter.ExpenseOnly">Expenses</option>
@@ -98,17 +100,18 @@
             </div>
             <div class="col-md-2">
                 <label class="form-label mb-0">From</label>
-                <input type="date" class="form-control form-control-sm" @bind="filterFrom" />
+                <input type="date" class="form-control form-control-sm" @bind="filterFrom" @bind:after="ApplyFilters" />
             </div>
             <div class="col-md-2">
                 <label class="form-label mb-0">To</label>
-                <input type="date" class="form-control form-control-sm" @bind="filterTo" />
+                <input type="date" class="form-control form-control-sm" @bind="filterTo" @bind:after="ApplyFilters" />
             </div>
             <div class="col-md-1">
                 <button class="btn btn-outline-secondary btn-sm w-100" @onclick="ClearFilters">Clear</button>
             </div>
             <div class="col-md-12 mt-2">
-                <input class="form-control form-control-sm" placeholder="Search description or payee…" @bind="filterSearch" @bind:event="oninput" />
+                <input class="form-control form-control-sm" placeholder="Search description or payee…"
+                       @bind="filterSearch" @bind:event="oninput" @bind:after="ApplyFilters" />
             </div>
         </div>
     </div>
@@ -123,11 +126,6 @@
 {
     <div class="alert alert-secondary">Loading…</div>
     return;
-}
-
-@{
-    var filtered = TransactionQueryService.Apply(allRows, CurrentFilter());
-    var shownTotal = filtered.Sum(r => r.Amount);
 }
 
 <p class="text-muted">
@@ -150,8 +148,8 @@
             </tr>
         </thead>
         <tbody>
-            @foreach (var r in filtered)
-            {
+            @* Virtualized so a few years of bank history doesn't render thousands of rows. *@
+            <Virtualize Items="filtered" Context="r" ItemSize="41">
                 <tr>
                     <td style="white-space:nowrap">@r.Date.ToShortDateString()</td>
                     <td>@r.AccountName</td>
@@ -188,7 +186,7 @@
                         }
                     </td>
                 </tr>
-            }
+            </Virtualize>
         </tbody>
     </table>
 }
@@ -201,6 +199,11 @@ else
     private List<AccountSummary> accounts = new();
     private List<TransactionRow> allRows = new();
     private List<string> categories = new();
+
+    // Filtered view, recomputed when the data or a filter changes — NOT in the render body,
+    // which would re-filter and re-sum the whole ledger on every render (one per keystroke).
+    private List<TransactionRow> filtered = new();
+    private decimal shownTotal;
     private bool showAddForm = false;
     private NewTransactionModel newTransaction = new();
     private string? editingId;       // non-null when the form is editing an existing transaction
@@ -238,6 +241,13 @@ else
         await LoadAccounts();
         allRows = await Query.LoadAllAsync();
         categories = TransactionQueryService.DistinctCategories(allRows).ToList();
+        ApplyFilters();
+    }
+
+    private void ApplyFilters()
+    {
+        filtered = TransactionQueryService.Apply(allRows, CurrentFilter()).ToList();
+        shownTotal = filtered.Sum(r => r.Amount);
     }
 
     private TransactionFilter CurrentFilter() => new(
@@ -256,6 +266,7 @@ else
         filterFrom = null;
         filterTo = null;
         filterSearch = "";
+        ApplyFilters();
     }
 
     private void ShowAddForm()
