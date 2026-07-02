@@ -23,6 +23,18 @@ builder.Services.AddMarten(opts =>
         // so Marten must use string stream identity rather than its Guid default.
         opts.Events.StreamIdentity = JasperFx.Events.StreamIdentity.AsString;
 
+        // Pin event type names explicitly (these are Marten's defaults for the current CLR
+        // names). Marten maps stored events to CLR types by this name, so without pinning, a
+        // class rename or namespace move would break deserialization of the entire history.
+        // Breaking payload changes should get a new event type + upcaster instead.
+        opts.Events.MapEventType<Budgeteer.Shared.Events.Accounts.AccountCreated>("account_created");
+        opts.Events.MapEventType<Budgeteer.Shared.Events.Accounts.TransactionRecorded>("transaction_recorded");
+        opts.Events.MapEventType<Budgeteer.Shared.Events.Accounts.TransactionDeleted>("transaction_deleted");
+        opts.Events.MapEventType<Budgeteer.Shared.Events.Budget.ExpenseRecorded>("expense_recorded");
+        opts.Events.MapEventType<Budgeteer.Shared.Events.Budget.IncomeRecorded>("income_recorded");
+        opts.Events.MapEventType<Budgeteer.Shared.Events.Budget.ExpenseCategorized>("expense_categorized");
+        opts.Events.MapEventType<Budgeteer.Shared.Events.Budget.IncomeCategorized>("income_categorized");
+
         // Read models / projections — maintained inline so queries hit documents,
         // not a full event-store replay. These are dedicated, side-effect-free read models
         // (the command-side Account/Expense aggregates keep their factory/business methods).

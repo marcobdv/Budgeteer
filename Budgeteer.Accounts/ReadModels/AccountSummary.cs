@@ -33,8 +33,6 @@ public class AccountSummary
         TransactionCount++;
     }
 
-    public void Apply(AccountBalanceChanged e) => Balance = e.NewBalance;
-
     // Duplicate deletes are prevented on the command side (the Account aggregate is checked
     // under FetchForWriting before a TransactionDeleted is appended); the count clamp is a
     // last-resort guard so a historical duplicate can't drive the summary negative.

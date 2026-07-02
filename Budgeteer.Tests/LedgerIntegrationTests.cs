@@ -41,7 +41,7 @@ public class LedgerIntegrationTests
     private static (BankImportService import, LedgerService ledger) Build(DocumentStore store)
     {
         var categorizer = new TransactionCategorizer(store);
-        var handler = new TransactionEventHandler(store, categorizer);
+        var handler = new TransactionEventHandler(categorizer);
         var transfers = new TransferDetectionService(store);
         return (new BankImportService(store, handler, categorizer, transfers),
                 new LedgerService(store, categorizer, handler, transfers));

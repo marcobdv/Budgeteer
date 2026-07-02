@@ -28,4 +28,23 @@ public class Income
         Source = evt.Source;
         RecordedAt = evt.RecordedAt;
     }
+
+    public void Apply(IncomeCategorized evt)
+    {
+        Category = evt.Category;
+    }
+
+    // Business logic: recategorize an income (mirrors Expense.Categorize, so a miscategorized
+    // salary or refund isn't stuck with its import-time category forever).
+    public IncomeCategorized Categorize(string category)
+    {
+        var evt = new IncomeCategorized(
+            IncomeId: Id,
+            Category: category,
+            CategorizedAt: DateTime.UtcNow
+        );
+
+        Apply(evt);
+        return evt;
+    }
 }

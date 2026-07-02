@@ -39,11 +39,6 @@ public class Account
             ImportKeys.Add(evt.ImportKey);
     }
 
-    public void Apply(AccountBalanceChanged evt)
-    {
-        Balance = evt.NewBalance;
-    }
-
     public void Apply(TransactionDeleted evt)
     {
         // Idempotent: a duplicate delete (e.g. raced in from two sessions before the

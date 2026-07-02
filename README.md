@@ -40,7 +40,7 @@ flowchart TB
 - **Events**: 
   - `AccountCreated`
   - `TransactionRecorded`
-  - `AccountBalanceChanged`
+  - `TransactionDeleted`
 - **Event Store**: PostgreSQL (`accounts-eventstore`)
 
 #### **Budget Domain** (`Budgeteer.Budget`)
@@ -49,8 +49,8 @@ flowchart TB
 - **Events**:
   - `ExpenseRecorded`
   - `IncomeRecorded`
-  - `TransferRecorded`
   - `ExpenseCategorized`
+  - `IncomeCategorized`
 - **Event Store**: shares the single Marten store (`accounts-eventstore`)
 
 ### Event Flow

@@ -29,16 +29,6 @@ public record TransactionRecorded(
 );
 
 /// <summary>
-/// Published when account balance changes
-/// </summary>
-public record AccountBalanceChanged(
-    string AccountId,
-    decimal OldBalance,
-    decimal NewBalance,
-    DateTime ChangedAt
-);
-
-/// <summary>
 /// Published when a previously recorded transaction is removed from an account.
 /// Carries the original amount (to reverse the balance) and import key (to allow re-import).
 /// </summary>

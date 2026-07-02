@@ -50,7 +50,7 @@ public class ProjectionTests
 
         var categorizer = new TransactionCategorizer(store);
         await categorizer.SeedDefaultsAsync();
-        var handler = new TransactionEventHandler(store, categorizer);
+        var handler = new TransactionEventHandler(categorizer);
 
         var created = Account.Create("Checking", "Checking", 0m, "NL11RABO0123456789");
         var account = new Account();
@@ -64,14 +64,13 @@ public class ProjectionTests
             session.Events.StartStream<Account>(created.AccountId, created);
             await session.SaveChangesAsync();
         }
+        // Account event + derived budget event commit atomically, as production does.
         await using (var session = store.LightweightSession())
         {
-            session.Events.Append(created.AccountId, expenseTxn);
-            session.Events.Append(created.AccountId, incomeTxn);
+            await handler.RecordAndProjectAsync(session, created.AccountId, expenseTxn);
+            await handler.RecordAndProjectAsync(session, created.AccountId, incomeTxn);
             await session.SaveChangesAsync();
         }
-        await handler.HandleAsync(expenseTxn);
-        await handler.HandleAsync(incomeTxn);
 
         await using var q = store.QuerySession();
 
@@ -101,5 +100,15 @@ public class ProjectionTests
         }
         var updated = await store.QuerySession().Query<ExpenseView>().SingleAsync();
         Assert.Equal("Dining", updated.Category);
+
+        // Income can be recategorized too — it is not stuck with its import-time category.
+        await using (var session = store.LightweightSession())
+        {
+            var liveIncome = await session.Events.AggregateStreamAsync<Income>(income.Id);
+            session.Events.Append(income.Id, liveIncome!.Categorize("Bonus"));
+            await session.SaveChangesAsync();
+        }
+        var updatedIncome = await store.QuerySession().Query<Income>().SingleAsync();
+        Assert.Equal("Bonus", updatedIncome.Category);
     }
 }

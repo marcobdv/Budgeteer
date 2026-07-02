@@ -52,6 +52,24 @@ public sealed class BudgetService
         await _categorizer.LearnAsync(expense.Payee, category);
     }
 
+    /// <summary>
+    /// Re-categorizes an income and learns from it, mirroring <see cref="RecategorizeAsync"/> —
+    /// incomes are not stuck with the category assigned at import time.
+    /// </summary>
+    public async Task RecategorizeIncomeAsync(string incomeId, string category)
+    {
+        await using var session = _store.LightweightSession();
+        var income = await session.Events.AggregateStreamAsync<Income>(incomeId);
+        if (income is null)
+            return;
+
+        var evt = income.Categorize(category);
+        session.Events.Append(incomeId, evt);
+        await session.SaveChangesAsync();
+
+        await _categorizer.LearnAsync(income.Source, category);
+    }
+
     /// <summary>Spending totals per category (expenses only), highest first.</summary>
     public static IReadOnlyList<(string Category, decimal Total, int Count)> SpendingByCategory(
         IEnumerable<ExpenseView> expenses)

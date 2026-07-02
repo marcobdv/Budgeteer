@@ -108,13 +108,17 @@ public class CategorizationTests
         await using var store = CreateStore();
         var categorizer = new TransactionCategorizer(store);
         await categorizer.SeedDefaultsAsync();
-        var handler = new TransactionEventHandler(store, categorizer);
+        var handler = new TransactionEventHandler(categorizer);
 
         var txn = new TransactionRecorded(
             System.Guid.NewGuid().ToString(), "acct-x", new System.DateTime(2024, 2, 1),
             "Boodschappen", -33.10m, "Albert Heijn 99", System.DateTime.UtcNow);
 
-        await handler.HandleAsync(txn);
+        await using (var write = store.LightweightSession())
+        {
+            await handler.RecordAndProjectAsync(write, "acct-x", txn);
+            await write.SaveChangesAsync();
+        }
 
         await using var session = store.LightweightSession();
         var expense = (await session.Events.QueryAllRawEvents()

@@ -13,28 +13,11 @@ namespace Budgeteer.Budget.EventHandlers;
 /// </summary>
 public class TransactionEventHandler
 {
-    private readonly IDocumentStore _store;
     private readonly TransactionCategorizer _categorizer;
 
-    public TransactionEventHandler(IDocumentStore store, TransactionCategorizer categorizer)
+    public TransactionEventHandler(TransactionCategorizer categorizer)
     {
-        _store = store;
         _categorizer = categorizer;
-    }
-
-    /// <summary>
-    /// Handles TransactionRecorded from Account domain
-    /// Determines if it's an expense, income, or transfer and creates appropriate event
-    /// </summary>
-    public async Task HandleAsync(TransactionRecorded accountEvent)
-    {
-        // Smart categorization: assign a category from the keyword rules up front.
-        var category = await _categorizer.CategorizeAsync(
-            accountEvent.Payee, accountEvent.Description, accountEvent.Amount);
-
-        await using var session = _store.LightweightSession();
-        Project(session, accountEvent, category);
-        await session.SaveChangesAsync();
     }
 
     /// <summary>

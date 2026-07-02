@@ -128,7 +128,7 @@ public class ImportIntegrationTests
 
         await using var store = CreateStore();
         var categorizer = new Budgeteer.Budget.Categorization.TransactionCategorizer(store);
-        var handler = new Budgeteer.Budget.EventHandlers.TransactionEventHandler(store, categorizer);
+        var handler = new Budgeteer.Budget.EventHandlers.TransactionEventHandler(categorizer);
 
         // An expense (negative) and an income (positive) transaction.
         var expenseTxn = new TransactionRecorded(
@@ -138,8 +138,12 @@ public class ImportIntegrationTests
             Guid.NewGuid().ToString(), "acct-1", new DateTime(2024, 1, 16),
             "Salaris", 2250.00m, "Werkgever BV", DateTime.UtcNow);
 
-        await handler.HandleAsync(expenseTxn);
-        await handler.HandleAsync(incomeTxn);
+        await using (var write = store.LightweightSession())
+        {
+            await handler.RecordAndProjectAsync(write, "acct-1", expenseTxn);
+            await handler.RecordAndProjectAsync(write, "acct-1", incomeTxn);
+            await write.SaveChangesAsync();
+        }
 
         await using var session = store.LightweightSession();
         var expenses = await session.Events.QueryAllRawEvents()

@@ -29,20 +29,6 @@ public record IncomeRecorded(
 );
 
 /// <summary>
-/// Published when Budget domain processes a transfer between accounts
-/// </summary>
-public record TransferRecorded(
-    string TransferId,
-    string FromTransactionId,
-    string ToTransactionId,
-    DateTime Date,
-    decimal Amount,
-    string FromAccount,
-    string ToAccount,
-    DateTime RecordedAt
-);
-
-/// <summary>
 /// Published when a category is assigned to an expense
 /// </summary>
 public record ExpenseCategorized(
@@ -52,11 +38,10 @@ public record ExpenseCategorized(
 );
 
 /// <summary>
-/// Published when a budget category is created
+/// Published when a category is assigned to an income
 /// </summary>
-public record CategoryCreated(
-    string CategoryId,
-    string Name,
-    string? ParentCategoryId,
-    DateTime CreatedAt
+public record IncomeCategorized(
+    string IncomeId,
+    string Category,
+    DateTime CategorizedAt
 );

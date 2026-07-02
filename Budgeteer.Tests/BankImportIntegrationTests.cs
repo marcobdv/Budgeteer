@@ -49,7 +49,7 @@ public class BankImportIntegrationTests
 
         var categorizer = new TransactionCategorizer(store);
         await categorizer.SeedDefaultsAsync();
-        var handler = new TransactionEventHandler(store, categorizer);
+        var handler = new TransactionEventHandler(categorizer);
         var transfers = new TransferDetectionService(store);
         var importer = new BankImportService(store, handler, categorizer, transfers);
 
@@ -91,7 +91,7 @@ public class BankImportIntegrationTests
         await store.Advanced.Clean.DeleteAllDocumentsAsync();
 
         var categorizer = new TransactionCategorizer(store);
-        var handler = new TransactionEventHandler(store, categorizer);
+        var handler = new TransactionEventHandler(categorizer);
         var transfers = new TransferDetectionService(store);
         var importer = new BankImportService(store, handler, categorizer, transfers);
 
@@ -130,7 +130,7 @@ public class BankImportIntegrationTests
         await store.Advanced.Clean.DeleteAllDocumentsAsync();
 
         var categorizer = new TransactionCategorizer(store);
-        var handler = new TransactionEventHandler(store, categorizer);
+        var handler = new TransactionEventHandler(categorizer);
         var transfers = new TransferDetectionService(store);
         var importer = new BankImportService(store, handler, categorizer, transfers);
 
