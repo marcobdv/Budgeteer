@@ -109,6 +109,17 @@
     </div>
 </div>
 
+@if (error is not null)
+{
+    <div class="alert alert-danger">@error</div>
+}
+
+@if (loading)
+{
+    <div class="alert alert-secondary">Loading…</div>
+    return;
+}
+
 @{
     var filtered = TransactionQueryService.Apply(allRows, CurrentFilter());
     var shownTotal = filtered.Sum(r => r.Amount);
@@ -190,6 +201,8 @@ else
     private string? editingId;       // non-null when the form is editing an existing transaction
     private string? pendingDelete;   // transaction id awaiting delete confirmation
     private bool busy;
+    private bool loading = true;
+    private string? error;
 
     // Filter state
     private string filterAccountId = "";
@@ -199,7 +212,21 @@ else
     private DateTime? filterTo;
     private string filterSearch = "";
 
-    protected override async Task OnInitializedAsync() => await Reload();
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            await Reload();
+        }
+        catch (Exception ex)
+        {
+            error = $"Could not load transactions: {ex.Message}";
+        }
+        finally
+        {
+            loading = false;
+        }
+    }
 
     private async Task Reload()
     {
@@ -257,50 +284,78 @@ else
     private async Task AddTransaction()
     {
         busy = true;
-        if (editingId is not null)
+        error = null;
+        try
         {
-            // Edit = replace the existing transaction (re-categorized) in one transaction.
-            await Ledger.ReplaceTransactionAsync(
-                editingId, newTransaction.Description, newTransaction.Amount, newTransaction.Date, newTransaction.Payee);
+            if (editingId is not null)
+            {
+                // Edit = replace the existing transaction (re-categorized) in one transaction.
+                await Ledger.ReplaceTransactionAsync(
+                    editingId, newTransaction.Description, newTransaction.Amount, newTransaction.Date, newTransaction.Payee);
+            }
+            else
+            {
+                await using var session = AccountStore.LightweightSession();
+                // Fetch with an expected version so a concurrent write to the same account
+                // fails on SaveChanges instead of silently interleaving.
+                var stream = await session.Events.FetchForWriting<Account>(newTransaction.AccountId);
+                var account = stream.Aggregate;
+                if (account == null)
+                {
+                    error = "Please select an account.";
+                    return;
+                }
+
+                var evt = account.RecordTransaction(
+                    description: newTransaction.Description,
+                    amount: newTransaction.Amount,
+                    transactionDate: newTransaction.Date,
+                    payee: newTransaction.Payee);
+
+                // Append the account event and its budget projection in one transaction (categorized),
+                // so the transaction can't land in the ledger without its matching expense/income view.
+                stream.AppendOne(evt);
+                await TransactionHandler.ProjectAsync(session, evt);
+                await session.SaveChangesAsync();
+
+                // A manually-added transaction may complete a transfer between own accounts.
+                await Transfers.DetectAsync();
+            }
+
+            showAddForm = false;
+            editingId = null;
+            await Reload();
         }
-        else
+        catch (Exception ex)
         {
-            await using var session = AccountStore.LightweightSession();
-            // Fetch with an expected version so a concurrent write to the same account
-            // fails on SaveChanges instead of silently interleaving.
-            var stream = await session.Events.FetchForWriting<Account>(newTransaction.AccountId);
-            var account = stream.Aggregate;
-            if (account == null) { busy = false; return; }
-
-            var evt = account.RecordTransaction(
-                description: newTransaction.Description,
-                amount: newTransaction.Amount,
-                transactionDate: newTransaction.Date,
-                payee: newTransaction.Payee);
-
-            // Append the account event and its budget projection in one transaction (categorized),
-            // so the transaction can't land in the ledger without its matching expense/income view.
-            stream.AppendOne(evt);
-            await TransactionHandler.ProjectAsync(session, evt);
-            await session.SaveChangesAsync();
-
-            // A manually-added transaction may complete a transfer between own accounts.
-            await Transfers.DetectAsync();
+            // Keep the form open with the typed values; a failure here (DB down, concurrent
+            // write conflict) must not tear down the circuit.
+            error = $"Could not save the transaction: {ex.Message}";
         }
-
-        showAddForm = false;
-        editingId = null;
-        await Reload();
-        busy = false;
+        finally
+        {
+            busy = false;
+        }
     }
 
     private async Task ConfirmDelete(string transactionId)
     {
         busy = true;
-        await Ledger.DeleteTransactionAsync(transactionId);
-        pendingDelete = null;
-        await Reload();
-        busy = false;
+        error = null;
+        try
+        {
+            await Ledger.DeleteTransactionAsync(transactionId);
+            pendingDelete = null;
+            await Reload();
+        }
+        catch (Exception ex)
+        {
+            error = $"Could not delete the transaction: {ex.Message}";
+        }
+        finally
+        {
+            busy = false;
+        }
     }
 
     private async Task LoadAccounts()

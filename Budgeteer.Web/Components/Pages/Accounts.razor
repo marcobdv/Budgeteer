@@ -16,6 +16,11 @@
     <button class="btn btn-primary" @onclick="ShowCreateForm">Create Account</button>
 </div>
 
+@if (error is not null)
+{
+    <div class="alert alert-danger">@error</div>
+}
+
 @if (showCreateForm)
 {
     <div class="card mb-4">
@@ -103,6 +108,7 @@ else
     private NewAccountModel newAccount = new();
     private string? pendingDelete;
     private bool busy;
+    private string? error;
 
     protected override async Task OnInitializedAsync()
     {
@@ -117,20 +123,33 @@ else
 
     private async Task CreateAccount()
     {
-        await using var session = AccountStore.LightweightSession();
+        busy = true;
+        error = null;
+        try
+        {
+            await using var session = AccountStore.LightweightSession();
 
-        var evt = Account.Create(
-            name: newAccount.Name,
-            accountType: newAccount.AccountType,
-            initialBalance: newAccount.InitialBalance,
-            iban: newAccount.Iban
-        );
+            var evt = Account.Create(
+                name: newAccount.Name,
+                accountType: newAccount.AccountType,
+                initialBalance: newAccount.InitialBalance,
+                iban: newAccount.Iban
+            );
 
-        session.Events.StartStream<Account>(evt.AccountId, evt);
-        await session.SaveChangesAsync();
+            session.Events.StartStream<Account>(evt.AccountId, evt);
+            await session.SaveChangesAsync();
 
-        showCreateForm = false;
-        await LoadAccounts();
+            showCreateForm = false;
+            await LoadAccounts();
+        }
+        catch (Exception ex)
+        {
+            error = $"Could not create the account: {ex.Message}";
+        }
+        finally
+        {
+            busy = false;
+        }
     }
 
     private async Task LoadAccounts()
@@ -143,10 +162,21 @@ else
     private async Task ConfirmDelete(string accountId)
     {
         busy = true;
-        await Ledger.DeleteAccountAsync(accountId);
-        pendingDelete = null;
-        await LoadAccounts();
-        busy = false;
+        error = null;
+        try
+        {
+            await Ledger.DeleteAccountAsync(accountId);
+            pendingDelete = null;
+            await LoadAccounts();
+        }
+        catch (Exception ex)
+        {
+            error = $"Could not delete the account: {ex.Message}";
+        }
+        finally
+        {
+            busy = false;
+        }
     }
 
     private class NewAccountModel

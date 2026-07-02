@@ -211,12 +211,22 @@
     {
         if (lastImport is null) return;
         busy = true;
-        var removed = await Ledger.UndoImportAsync(lastImport.Id);
-        undoMessage = $"Undid the import — removed {removed} transaction(s).";
-        undoConfirm = false;
-        lastImport = await Ledger.GetLastImportAsync();
-        accounts = await ImportService.LoadAccountsAsync();
-        busy = false;
+        try
+        {
+            var removed = await Ledger.UndoImportAsync(lastImport.Id);
+            undoMessage = $"Undid the import — removed {removed} transaction(s).";
+            undoConfirm = false;
+            lastImport = await Ledger.GetLastImportAsync();
+            accounts = await ImportService.LoadAccountsAsync();
+        }
+        catch (Exception ex)
+        {
+            undoMessage = $"Undo failed: {ex.Message}";
+        }
+        finally
+        {
+            busy = false;
+        }
     }
 
     private async Task OnFileSelected(InputFileChangeEventArgs e)

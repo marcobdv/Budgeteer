@@ -152,30 +152,64 @@ else
             return;
         }
         busy = true;
-        draft.CreatedAt = DateTime.UtcNow;
-        if (string.IsNullOrWhiteSpace(draft.LinkedAccountId))
-            draft.LinkedAccountId = null;
-        await GoalService.SaveAsync(draft);
-        draft = new SavingGoal();
-        await Load();
-        busy = false;
+        try
+        {
+            draft.CreatedAt = DateTime.UtcNow;
+            if (string.IsNullOrWhiteSpace(draft.LinkedAccountId))
+                draft.LinkedAccountId = null;
+            await GoalService.SaveAsync(draft);
+            draft = new SavingGoal();
+            await Load();
+        }
+        catch (Exception ex)
+        {
+            error = $"Could not save the goal: {ex.Message}";
+        }
+        finally
+        {
+            busy = false;
+        }
     }
 
     private async Task UpdateManual(SavingGoal goal, string? raw)
     {
-        decimal.TryParse(raw, System.Globalization.NumberStyles.Number,
-            System.Globalization.CultureInfo.InvariantCulture, out var amount);
-        goal.ManualAmount = amount;
-        await GoalService.SaveAsync(goal);
-        await Load();
+        error = null;
+        // An unparseable value is ignored (same guard as the Budget page's limits), so a
+        // typo can't silently zero the goal's saved amount.
+        if (!decimal.TryParse(raw, System.Globalization.NumberStyles.Number,
+                System.Globalization.CultureInfo.InvariantCulture, out var amount))
+        {
+            return;
+        }
+        try
+        {
+            goal.ManualAmount = amount;
+            await GoalService.SaveAsync(goal);
+            await Load();
+        }
+        catch (Exception ex)
+        {
+            error = $"Could not update the goal: {ex.Message}";
+        }
     }
 
     private async Task Delete(string id)
     {
         busy = true;
-        await GoalService.DeleteAsync(id);
-        await Load();
-        busy = false;
+        error = null;
+        try
+        {
+            await GoalService.DeleteAsync(id);
+            await Load();
+        }
+        catch (Exception ex)
+        {
+            error = $"Could not delete the goal: {ex.Message}";
+        }
+        finally
+        {
+            busy = false;
+        }
     }
 
     private string AccountName(string? id) =>

@@ -36,7 +36,16 @@
     </div>
 </div>
 
-@if (rules.Count == 0)
+@if (error is not null)
+{
+    <div class="alert alert-danger">@error</div>
+}
+
+@if (loading)
+{
+    <div class="alert alert-secondary">Loading…</div>
+}
+else if (rules.Count == 0)
 {
     <div class="alert alert-info">No rules yet.</div>
 }
@@ -73,8 +82,24 @@ else
     private string newKeyword = "";
     private string newCategory = "";
     private bool busy;
+    private bool loading = true;
+    private string? error;
 
-    protected override async Task OnInitializedAsync() => await Load();
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            await Load();
+        }
+        catch (Exception ex)
+        {
+            error = $"Could not load the rules: {ex.Message}";
+        }
+        finally
+        {
+            loading = false;
+        }
+    }
 
     private async Task Load()
     {
@@ -86,19 +111,41 @@ else
         if (string.IsNullOrWhiteSpace(newKeyword) || string.IsNullOrWhiteSpace(newCategory))
             return;
         busy = true;
-        await Categorizer.AddOrUpdateRuleAsync(newKeyword, newCategory, RuleSource.Manual);
-        newKeyword = "";
-        newCategory = "";
-        await Load();
-        busy = false;
+        error = null;
+        try
+        {
+            await Categorizer.AddOrUpdateRuleAsync(newKeyword, newCategory, RuleSource.Manual);
+            newKeyword = "";
+            newCategory = "";
+            await Load();
+        }
+        catch (Exception ex)
+        {
+            error = $"Could not add the rule: {ex.Message}";
+        }
+        finally
+        {
+            busy = false;
+        }
     }
 
     private async Task DeleteRule(string id)
     {
         busy = true;
-        await Categorizer.DeleteRuleAsync(id);
-        await Load();
-        busy = false;
+        error = null;
+        try
+        {
+            await Categorizer.DeleteRuleAsync(id);
+            await Load();
+        }
+        catch (Exception ex)
+        {
+            error = $"Could not delete the rule: {ex.Message}";
+        }
+        finally
+        {
+            busy = false;
+        }
     }
 
     private IEnumerable<string> KnownCategories() =>

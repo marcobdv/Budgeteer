@@ -239,10 +239,20 @@ else
     private async Task DetectTransfers()
     {
         detecting = true;
-        var found = await Transfers.DetectAsync();
-        transferMessage = found > 0 ? $"Found {found} new transfer(s)." : "No new transfers found.";
-        await Load();
-        detecting = false;
+        try
+        {
+            var found = await Transfers.DetectAsync();
+            transferMessage = found > 0 ? $"Found {found} new transfer(s)." : "No new transfers found.";
+            await Load();
+        }
+        catch (Exception ex)
+        {
+            transferMessage = $"Detection failed: {ex.Message}";
+        }
+        finally
+        {
+            detecting = false;
+        }
     }
 
     private async Task SetLimit(string category, string? raw)
@@ -257,9 +267,16 @@ else
         }
         decimal.TryParse(raw, System.Globalization.NumberStyles.Number,
             System.Globalization.CultureInfo.InvariantCulture, out var limit);
-        await Allocations.SetAsync(category, limit);
-        allocations = await Allocations.GetAllAsync();
-        Apply();
+        try
+        {
+            await Allocations.SetAsync(category, limit);
+            allocations = await Allocations.GetAllAsync();
+            Apply();
+        }
+        catch (Exception ex)
+        {
+            transferMessage = $"Could not save the limit: {ex.Message}";
+        }
     }
 
     private static string BarClass(CategoryBudget r) =>
@@ -278,7 +295,14 @@ else
 
     private async Task Recategorize(string expenseId, string? category)
     {
-        await BudgetService.RecategorizeAsync(expenseId, category ?? "");
-        await Load();
+        try
+        {
+            await BudgetService.RecategorizeAsync(expenseId, category ?? "");
+            await Load();
+        }
+        catch (Exception ex)
+        {
+            transferMessage = $"Could not recategorize: {ex.Message}";
+        }
     }
 }
