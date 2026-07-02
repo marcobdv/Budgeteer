@@ -28,10 +28,6 @@ flowchart TB
     MCP -- "HTTPS" --> TAV["Tavily Search API"]
 ```
 
-> The `Budgeteer.AppHost` orchestrator still provisions a second PostgreSQL database
-> (`budget-eventstore`) from the original dual-store design, but the application currently
-> connects only to `accounts-eventstore`.
-
 ### Domain Separation
 
 #### **Account Domain** (`Budgeteer.Accounts`)
@@ -104,7 +100,7 @@ dotnet run
 ```
 
 Aspire will:
-- Start two PostgreSQL containers (one per domain)
+- Start a PostgreSQL container for the event store
 - Start Blazor web application
 - Open Aspire dashboard at http://localhost:15000
 
@@ -353,7 +349,7 @@ Rebuild Budget domain from Account events for disaster recovery
 ## 🔄 Next Steps
 
 ### Phase 1 (Current - MVP)
-- ✅ Dual event stores with Aspire
+- ✅ Event store on PostgreSQL with Aspire orchestration
 - ✅ Account domain with basic CRUD
 - ✅ Budget domain event handler
 - ✅ Blazor UI for accounts and transactions

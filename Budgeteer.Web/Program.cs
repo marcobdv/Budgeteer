@@ -12,9 +12,15 @@ builder.AddServiceDefaults();
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 
-// Configure Marten Event Store (single store for MVP)
+// Configure Marten Event Store (single store for MVP). The localhost fallback exists only for
+// the standalone dev loop (dockerized Postgres, no Aspire); outside Development a missing
+// connection string fails fast instead of silently connecting to a default local database.
 var connectionString = builder.Configuration.GetConnectionString("accounts-eventstore")
-    ?? "Host=localhost;Database=budgeteer;Username=postgres;Password=postgres";
+    ?? (builder.Environment.IsDevelopment()
+        ? "Host=localhost;Database=budgeteer;Username=postgres;Password=postgres"
+        : throw new InvalidOperationException(
+            "Connection string 'accounts-eventstore' is not configured. " +
+            "Run via Budgeteer.AppHost (Aspire provides it), or set ConnectionStrings:accounts-eventstore."));
 
 builder.Services.AddMarten(opts =>
     {
