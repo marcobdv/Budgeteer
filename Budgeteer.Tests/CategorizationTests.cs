@@ -10,18 +10,9 @@ namespace Budgeteer.Tests;
 
 public class CategorizationTests
 {
-    private const string ConnectionString =
-        "Host=localhost;Port=5432;Database=budgeteer;Username=postgres;Password=postgres;Timeout=3;Command Timeout=10";
-
-    private static bool PostgresAvailable()
-    {
-        try { using var c = new NpgsqlConnection(ConnectionString); c.Open(); return true; }
-        catch { return false; }
-    }
-
     private static DocumentStore CreateStore() => DocumentStore.For(opts =>
     {
-        opts.Connection(ConnectionString);
+        opts.Connection(TestPostgres.ConnectionString);
         opts.DatabaseSchemaName = "cat_it";
         opts.Events.StreamIdentity = JasperFx.Events.StreamIdentity.AsString;
     });
@@ -71,7 +62,7 @@ public class CategorizationTests
     [SkippableFact]
     public async Task Seeded_defaults_categorize_known_dutch_merchants()
     {
-        Skip.IfNot(PostgresAvailable(), "Local PostgreSQL not available.");
+        TestPostgres.SkipUnlessAvailable();
 
         await using var store = CreateStore();
         var categorizer = new TransactionCategorizer(store);
@@ -85,7 +76,7 @@ public class CategorizationTests
     [SkippableFact]
     public async Task Learning_makes_future_transactions_auto_categorize()
     {
-        Skip.IfNot(PostgresAvailable(), "Local PostgreSQL not available.");
+        TestPostgres.SkipUnlessAvailable();
 
         await using var store = CreateStore();
         var categorizer = new TransactionCategorizer(store);
@@ -103,9 +94,13 @@ public class CategorizationTests
     [SkippableFact]
     public async Task Importing_through_the_handler_auto_categorizes_the_expense()
     {
-        Skip.IfNot(PostgresAvailable(), "Local PostgreSQL not available.");
+        TestPostgres.SkipUnlessAvailable();
 
         await using var store = CreateStore();
+        // Clean so the schema doesn't grow forever and QueryAllRawEvents stays cheap.
+        await store.Advanced.Clean.DeleteAllEventDataAsync();
+        await store.Advanced.Clean.DeleteAllDocumentsAsync();
+
         var categorizer = new TransactionCategorizer(store);
         await categorizer.SeedDefaultsAsync();
         var handler = new TransactionEventHandler(categorizer);

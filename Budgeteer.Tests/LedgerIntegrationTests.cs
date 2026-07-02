@@ -18,17 +18,9 @@ namespace Budgeteer.Tests;
 /// </summary>
 public class LedgerIntegrationTests
 {
-    private const string Conn =
-        "Host=localhost;Port=5432;Database=budgeteer;Username=postgres;Password=postgres;Timeout=3;Command Timeout=10";
-
-    private static bool Pg()
-    {
-        try { using var c = new NpgsqlConnection(Conn); c.Open(); return true; } catch { return false; }
-    }
-
     private static DocumentStore CreateStore() => DocumentStore.For(opts =>
     {
-        opts.Connection(Conn);
+        opts.Connection(TestPostgres.ConnectionString);
         opts.DatabaseSchemaName = "ledger_it";
         opts.Events.StreamIdentity = JasperFx.Events.StreamIdentity.AsString;
         opts.Projections.Snapshot<AccountSummary>(Marten.Events.Projections.SnapshotLifecycle.Inline);
@@ -50,7 +42,7 @@ public class LedgerIntegrationTests
     [SkippableFact]
     public async Task Deleting_a_transaction_reverses_balance_and_removes_its_budget_view()
     {
-        Skip.IfNot(Pg(), "Local PostgreSQL not available.");
+        TestPostgres.SkipUnlessAvailable();
 
         await using var store = CreateStore();
         await store.Advanced.Clean.DeleteAllEventDataAsync();
@@ -83,7 +75,7 @@ public class LedgerIntegrationTests
     [SkippableFact]
     public async Task Undoing_an_import_removes_its_transactions_and_frees_keys_for_reimport()
     {
-        Skip.IfNot(Pg(), "Local PostgreSQL not available.");
+        TestPostgres.SkipUnlessAvailable();
 
         await using var store = CreateStore();
         await store.Advanced.Clean.DeleteAllEventDataAsync();
@@ -116,7 +108,7 @@ public class LedgerIntegrationTests
     [SkippableFact]
     public async Task Editing_an_imported_transaction_keeps_its_dedup_key_so_reimport_skips_it()
     {
-        Skip.IfNot(Pg(), "Local PostgreSQL not available.");
+        TestPostgres.SkipUnlessAvailable();
 
         await using var store = CreateStore();
         await store.Advanced.Clean.DeleteAllEventDataAsync();

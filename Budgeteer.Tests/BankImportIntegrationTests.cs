@@ -18,17 +18,9 @@ namespace Budgeteer.Tests;
 /// </summary>
 public class BankImportIntegrationTests
 {
-    private const string Conn =
-        "Host=localhost;Port=5432;Database=budgeteer;Username=postgres;Password=postgres;Timeout=3;Command Timeout=10";
-
-    private static bool Pg()
-    {
-        try { using var c = new NpgsqlConnection(Conn); c.Open(); return true; } catch { return false; }
-    }
-
     private static DocumentStore CreateStore() => DocumentStore.For(opts =>
     {
-        opts.Connection(Conn);
+        opts.Connection(TestPostgres.ConnectionString);
         opts.DatabaseSchemaName = "import_svc_it";
         opts.Events.StreamIdentity = JasperFx.Events.StreamIdentity.AsString;
         opts.Projections.Snapshot<AccountSummary>(Marten.Events.Projections.SnapshotLifecycle.Inline);
@@ -41,7 +33,7 @@ public class BankImportIntegrationTests
     [SkippableFact]
     public async Task Import_commits_account_and_budget_atomically_and_categorizes()
     {
-        Skip.IfNot(Pg(), "Local PostgreSQL not available.");
+        TestPostgres.SkipUnlessAvailable();
 
         await using var store = CreateStore();
         await store.Advanced.Clean.DeleteAllEventDataAsync();
@@ -84,7 +76,7 @@ public class BankImportIntegrationTests
     [SkippableFact]
     public async Task Multi_account_export_only_imports_rows_matching_the_target_accounts_iban()
     {
-        Skip.IfNot(Pg(), "Local PostgreSQL not available.");
+        TestPostgres.SkipUnlessAvailable();
 
         await using var store = CreateStore();
         await store.Advanced.Clean.DeleteAllEventDataAsync();
@@ -123,7 +115,7 @@ public class BankImportIntegrationTests
     [SkippableFact]
     public async Task Multi_account_export_into_an_ibanless_account_is_refused()
     {
-        Skip.IfNot(Pg(), "Local PostgreSQL not available.");
+        TestPostgres.SkipUnlessAvailable();
 
         await using var store = CreateStore();
         await store.Advanced.Clean.DeleteAllEventDataAsync();

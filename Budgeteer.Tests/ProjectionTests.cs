@@ -17,18 +17,10 @@ namespace Budgeteer.Tests;
 /// </summary>
 public class ProjectionTests
 {
-    private const string Conn =
-        "Host=localhost;Port=5432;Database=budgeteer;Username=postgres;Password=postgres;Timeout=3;Command Timeout=10";
-
-    private static bool Pg()
-    {
-        try { using var c = new NpgsqlConnection(Conn); c.Open(); return true; } catch { return false; }
-    }
-
     // Mirrors the app's Marten projection registration.
     private static DocumentStore CreateStore() => DocumentStore.For(opts =>
     {
-        opts.Connection(Conn);
+        opts.Connection(TestPostgres.ConnectionString);
         opts.DatabaseSchemaName = "proj_it";
         opts.Events.StreamIdentity = JasperFx.Events.StreamIdentity.AsString;
         opts.Projections.Snapshot<AccountSummary>(Marten.Events.Projections.SnapshotLifecycle.Inline);
@@ -41,7 +33,7 @@ public class ProjectionTests
     [SkippableFact]
     public async Task Inline_projections_maintain_all_read_models()
     {
-        Skip.IfNot(Pg(), "Local PostgreSQL not available.");
+        TestPostgres.SkipUnlessAvailable();
 
         await using var store = CreateStore();
         // Deterministic start so Single() assertions hold across runs.

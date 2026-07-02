@@ -17,26 +17,9 @@ namespace Budgeteer.Tests;
 /// </summary>
 public class ImportIntegrationTests
 {
-    private const string ConnectionString =
-        "Host=localhost;Port=5432;Database=budgeteer;Username=postgres;Password=postgres;Timeout=3;Command Timeout=10";
-
-    private static bool PostgresAvailable()
-    {
-        try
-        {
-            using var conn = new NpgsqlConnection(ConnectionString);
-            conn.Open();
-            return true;
-        }
-        catch
-        {
-            return false;
-        }
-    }
-
     private static DocumentStore CreateStore() => DocumentStore.For(opts =>
     {
-        opts.Connection(ConnectionString);
+        opts.Connection(TestPostgres.ConnectionString);
         // Isolate test data in its own schema so we never touch app data.
         opts.DatabaseSchemaName = "import_it";
         // Streams are keyed by string ids, matching the app configuration.
@@ -52,9 +35,12 @@ public class ImportIntegrationTests
     [SkippableFact]
     public async Task Importing_a_rabobank_file_records_events_and_rebuilds_balance()
     {
-        Skip.IfNot(PostgresAvailable(), "Local PostgreSQL not available.");
+        TestPostgres.SkipUnlessAvailable();
 
         await using var store = CreateStore();
+        await store.Advanced.Clean.DeleteAllEventDataAsync();
+        await store.Advanced.Clean.DeleteAllDocumentsAsync();
+
         var importer = new BankStatementImporter();
         var mutations = importer.Parse(Encoding.UTF8.GetBytes(Samples.RabobankCsv));
         Assert.Equal(2, mutations.Count);
@@ -91,9 +77,12 @@ public class ImportIntegrationTests
     [SkippableFact]
     public async Task Reimporting_the_same_file_skips_duplicates()
     {
-        Skip.IfNot(PostgresAvailable(), "Local PostgreSQL not available.");
+        TestPostgres.SkipUnlessAvailable();
 
         await using var store = CreateStore();
+        await store.Advanced.Clean.DeleteAllEventDataAsync();
+        await store.Advanced.Clean.DeleteAllDocumentsAsync();
+
         var importer = new BankStatementImporter();
         var mutations = importer.Parse(Encoding.UTF8.GetBytes(Samples.KnabCsv));
 
@@ -124,9 +113,12 @@ public class ImportIntegrationTests
     [SkippableFact]
     public async Task Budget_handler_projects_expense_and_income_streams()
     {
-        Skip.IfNot(PostgresAvailable(), "Local PostgreSQL not available.");
+        TestPostgres.SkipUnlessAvailable();
 
         await using var store = CreateStore();
+        await store.Advanced.Clean.DeleteAllEventDataAsync();
+        await store.Advanced.Clean.DeleteAllDocumentsAsync();
+
         var categorizer = new Budgeteer.Budget.Categorization.TransactionCategorizer(store);
         var handler = new Budgeteer.Budget.EventHandlers.TransactionEventHandler(categorizer);
 
