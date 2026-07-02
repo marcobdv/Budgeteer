@@ -17,10 +17,9 @@ public sealed class SearchMcpClient : IAsyncDisposable
 {
     private readonly ILogger<SearchMcpClient> _log;
     private readonly IConfiguration _config;
-    private readonly SemaphoreSlim _gate = new(1, 1);
+    private readonly object _lock = new();
     private McpClient? _client;
-    private IReadOnlyList<AITool> _tools = Array.Empty<AITool>();
-    private bool _attempted;
+    private Task<IReadOnlyList<AITool>>? _connectTask;
 
     public SearchMcpClient(ILogger<SearchMcpClient> log, IConfiguration config)
     {
@@ -41,34 +40,45 @@ public sealed class SearchMcpClient : IAsyncDisposable
             return File.Exists(configured) ? configured : null;
 
         // .../Budgeteer.Web/bin/<cfg>/net9.0  ->  .../Budgeteer.SearchMcp/bin/<cfg>/net9.0
-        var sibling = AppContext.BaseDirectory
-            .Replace("Budgeteer.Web", "Budgeteer.SearchMcp");
-        var dll = Path.Combine(sibling, "Budgeteer.SearchMcp.dll");
+        // Replace only the project directory segment: a blanket string.Replace would also
+        // rewrite a parent folder that happens to contain "Budgeteer.Web" in its name.
+        var baseDir = AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var segments = baseDir.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var idx = Array.FindLastIndex(segments, s => string.Equals(s, "Budgeteer.Web", StringComparison.OrdinalIgnoreCase));
+        if (idx < 0)
+            return null;
+        segments[idx] = "Budgeteer.SearchMcp";
+        var dll = Path.Combine(string.Join(Path.DirectorySeparatorChar, segments), "Budgeteer.SearchMcp.dll");
         return File.Exists(dll) ? dll : null;
     }
 
     /// <summary>
     /// Returns the search tools, connecting to the MCP server on first call. Always returns a list
-    /// (empty if the server is unavailable) — never throws.
+    /// (empty if the server is unavailable) — never throws. Concurrent callers share one connect
+    /// attempt and all wait for its result: an "attempted" flag set before the (seconds-long)
+    /// connect would let a second circuit grab the still-empty tool list and cache an agent
+    /// without web search for the life of that circuit.
     /// </summary>
-    public async Task<IReadOnlyList<AITool>> GetToolsAsync(CancellationToken cancellationToken = default)
+    public Task<IReadOnlyList<AITool>> GetToolsAsync(CancellationToken cancellationToken = default)
     {
-        if (_attempted)
-            return _tools;
+        lock (_lock)
+        {
+            _connectTask ??= ConnectAsync();
+        }
+        // The shared connect keeps running even if this caller gives up waiting.
+        return _connectTask.WaitAsync(cancellationToken);
+    }
 
-        await _gate.WaitAsync(cancellationToken);
+    private async Task<IReadOnlyList<AITool>> ConnectAsync()
+    {
         try
         {
-            if (_attempted)
-                return _tools;
-            _attempted = true;
-
             var serverDll = ResolveServerDll();
             if (serverDll is null)
             {
                 _log.LogWarning("MCP search server assembly not found; web search is disabled. " +
                     "Set SearchMcp:ServerPath to enable it.");
-                return _tools;
+                return Array.Empty<AITool>();
             }
 
             var transport = new StdioClientTransport(new StdioClientTransportOptions
@@ -78,27 +88,29 @@ public sealed class SearchMcpClient : IAsyncDisposable
                 Arguments = [serverDll],
             });
 
-            _client = await McpClient.CreateAsync(transport, cancellationToken: cancellationToken);
-            var tools = await _client.ListToolsAsync(cancellationToken: cancellationToken);
-            _tools = tools.Cast<AITool>().ToList();
-            _log.LogInformation("Connected to MCP search server; {Count} tool(s) available.", _tools.Count);
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            _client = await McpClient.CreateAsync(transport, cancellationToken: timeout.Token);
+            var tools = await _client.ListToolsAsync(cancellationToken: timeout.Token);
+            var result = (IReadOnlyList<AITool>)tools.Cast<AITool>().ToList();
+            _log.LogInformation("Connected to MCP search server; {Count} tool(s) available.", result.Count);
+            return result;
         }
         catch (Exception ex)
         {
-            _log.LogWarning(ex, "Could not start the MCP search server; web search is disabled.");
+            _log.LogWarning(ex, "Could not start the MCP search server; web search is disabled for now.");
+            // Clear the cached attempt so a later circuit retries — a transient startup
+            // failure shouldn't disable web search for the whole process lifetime.
+            lock (_lock)
+            {
+                _connectTask = null;
+            }
+            return Array.Empty<AITool>();
         }
-        finally
-        {
-            _gate.Release();
-        }
-
-        return _tools;
     }
 
     public async ValueTask DisposeAsync()
     {
         if (_client is not null)
             await _client.DisposeAsync();
-        _gate.Dispose();
     }
 }

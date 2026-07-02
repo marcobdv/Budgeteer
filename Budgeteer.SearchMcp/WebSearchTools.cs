@@ -22,8 +22,13 @@ public sealed class WebSearchTools
 {
     private const string TavilyEndpoint = "https://api.tavily.com/search";
 
-    // One shared client for the process — avoids socket exhaustion across tool calls.
-    private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(30) };
+    // One shared client for the process — avoids socket exhaustion across tool calls. The pooled
+    // connection lifetime makes a long-lived process pick up DNS changes for the endpoint.
+    private static readonly HttpClient Http = new(new SocketsHttpHandler
+    {
+        PooledConnectionLifetime = TimeSpan.FromMinutes(5),
+    })
+    { Timeout = TimeSpan.FromSeconds(30) };
 
     private readonly IConfiguration _config;
 
@@ -106,6 +111,12 @@ public sealed class WebSearchTools
             }
 
             return sb.ToString();
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // The *caller* cancelled (host shutdown, agent run aborted) — propagate rather
+            // than answering the dead request with a friendly "timed out" tool result.
+            throw;
         }
         catch (OperationCanceledException)
         {
