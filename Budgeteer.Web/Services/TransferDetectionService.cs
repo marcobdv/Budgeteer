@@ -23,10 +23,20 @@ public sealed class TransferDetectionService
         await using var session = _store.LightweightSession();
         var txns = await session.Query<TransactionView>().ToListAsync();
         var accounts = await session.Query<AccountSummary>().ToListAsync();
-        var existing = (await session.Query<TransferLink>().ToListAsync())
-            .Select(l => l.Id).ToHashSet();
+        var existingLinks = await session.Query<TransferLink>().ToListAsync();
+        var existing = existingLinks.Select(l => l.Id).ToHashSet();
 
-        var links = Detect(txns, accounts);
+        // Transactions already in a persisted link must be off the table for this run, or a
+        // later import can offer a "better" (closer-date) candidate and pair an already-linked
+        // leg a second time — leaving one transaction in two links and over-excluding income.
+        var alreadyLinked = new HashSet<string>();
+        foreach (var l in existingLinks)
+        {
+            alreadyLinked.Add(l.FromTransactionId);
+            alreadyLinked.Add(l.ToTransactionId);
+        }
+
+        var links = Detect(txns, accounts, alreadyLinked);
         int added = 0;
         foreach (var link in links)
         {
@@ -63,7 +73,8 @@ public sealed class TransferDetectionService
     /// full scan) and iterated in a deterministic order so pairing is stable across runs.
     /// </summary>
     public static IReadOnlyList<TransferLink> Detect(
-        IReadOnlyList<TransactionView> txns, IReadOnlyList<AccountSummary> accounts)
+        IReadOnlyList<TransactionView> txns, IReadOnlyList<AccountSummary> accounts,
+        IReadOnlyCollection<string>? alreadyLinkedTransactionIds = null)
     {
         var ibanByAccount = accounts
             .Where(a => !string.IsNullOrWhiteSpace(a.Iban))
@@ -76,7 +87,9 @@ public sealed class TransferDetectionService
             .GroupBy(t => t.Amount)
             .ToDictionary(g => g.Key, g => g.ToList());
 
-        var used = new HashSet<string>();
+        var used = alreadyLinkedTransactionIds is null
+            ? new HashSet<string>()
+            : new HashSet<string>(alreadyLinkedTransactionIds);
         var links = new List<TransferLink>();
 
         foreach (var o in txns.Where(t => t.Amount < 0)

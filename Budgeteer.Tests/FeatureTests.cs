@@ -143,6 +143,31 @@ public class TransferDetectionLogicTests
 
         Assert.Empty(TransferDetectionService.Detect(txns, Accounts));
     }
+
+    [Fact]
+    public void Already_linked_transactions_are_not_paired_again()
+    {
+        // t1<->t2 were linked in an earlier run (2 days apart). A later import adds t5, a
+        // same-day — i.e. "better" — candidate for t1. Recomputing must not re-pair t1,
+        // or t1 ends up in two links and both t2 and t5 get excluded from income.
+        var d = new DateTime(2024, 3, 1);
+        var txns = new List<TransactionView>
+        {
+            Tx("t1", "accA", -100m, d, "NL22BBBB0000000002"),
+            Tx("t2", "accB", 100m, d.AddDays(2), "NL11AAAA0000000001"),
+            Tx("t5", "accB", 100m, d, "NL11AAAA0000000001"),
+        };
+
+        var links = TransferDetectionService.Detect(txns, Accounts,
+            alreadyLinkedTransactionIds: new[] { "t1", "t2" });
+
+        Assert.Empty(links);
+
+        // Sanity: without the seed, the closer-date candidate t5 would indeed win.
+        var unseeded = TransferDetectionService.Detect(txns, Accounts);
+        var link = Assert.Single(unseeded);
+        Assert.Equal("t5", link.ToTransactionId);
+    }
 }
 
 public class SavingGoalLogicTests
